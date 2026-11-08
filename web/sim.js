@@ -223,8 +223,8 @@ function orderTick(S){
   S.orders.forEach(function(o){
     if(o.state === 'done' || o.state === 'lost') return;
     if(o.state === 'air') return;
-    if(S.t - o.born > o.patience && o.state !== 'van'){
-      // a bouquet already in a van always gets its chance
+    if(S.t - o.born > o.patience && o.state !== 'van' && o.state !== 'arr'){
+      // a bouquet in a van, or on somebody's bench, always gets its chance
       cancel(S, o);
     }
   });

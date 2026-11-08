@@ -124,7 +124,7 @@ function joinLocal(code, h){
   var me = 'p' + Math.random().toString(36).slice(2, 10), c = null;
   var timer = setTimeout(function(){
     if(!c){ bc.close(); h.error('peer-unavailable'); }
-  }, 3000);
+  }, 8000);
   bc.onmessage = function(ev){
     var m = ev.data;
     if(!m || m.to !== me) return;
