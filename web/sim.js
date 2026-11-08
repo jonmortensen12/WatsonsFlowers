@@ -134,9 +134,11 @@ function startSpot(S, sh, i){
   var h = S.M.houses[sh.house];
   return {x: sh.front.x + (i % 3) * 8 - 8, z: sh.front.z, h: Math.abs(h.fdx) > 0 ? Math.PI / 2 : 0};
 }
-function setOwner(S, i, owner, name){
+function setOwner(S, i, owner, name, remote){
   var v = S.vans[i]; if(!v) return;
   v.owner = owner || null;
+  v.remote = !!(owner && remote);
+  if(!v.remote && v.crash && v.crash.remote) v.crash = null;
   if(name) v.name = name;
   v.st = v.gas = v.brk = v.bst = 0;
 }
@@ -650,10 +652,9 @@ function collideStatic(S, v, ox, oz){
 }
 
 /* ---------------- crashes ---------------- */
-function crash(S, v, cause, imp, nx, nz){
-  if(v.crash) return;
-  var R = S.R;
-  var lost = [];
+/* the bouquets a crash costs (the TV's side of a crash) */
+function crashCargo(S, v, cause, imp){
+  var R = S.R, lost = [];
   var n = v.cargo.length;
   var nLose = cause === 'canal' ? n : n ? Math.max(1, Math.ceil(n * 0.5)) : 0;
   for(var k = 0; k < nLose; k++){
@@ -663,6 +664,21 @@ function crash(S, v, cause, imp, nx, nz){
     if(o){ o.state = 'new'; o.van = -1; o.by = null; o.born = Math.max(o.born, S.t - o.patience + 75); lost.push(o.ri); }
   }
   if(v.prio != null && v.cargo.indexOf(v.prio) < 0) v.prio = null;
+  var cost = Math.round(800 + imp * 260);
+  S.crashes++; S.damage += cost;
+  S.rep = Math.max(0, S.rep - 0.03 * lost.length);
+  v.stats.crashes++;
+  var p = person(S, v.owner, v.owner ? v.name : null); if(p) p.crashes++;
+  if(!S.best.crash || imp > S.best.crash.imp) S.best.crash = {imp: imp, name: v.name, owner: v.owner, cause: cause, lost: lost.length, street: v.street};
+  return {lost: lost, cost: cost};
+}
+
+function crash(S, v, cause, imp, nx, nz){
+  if(v.crash) return;
+  var R = S.R;
+  // on a phone (S.local) the van only tumbles; the TV is told and does the rest
+  var cc = S.local ? {lost: [], cost: 0} : crashCargo(S, v, cause, imp);
+  var lost = cc.lost, cost = cc.cost;
   // bounce back off what was hit, then tumble
   var vx = v.vx, vz = v.vz;
   if(cause !== 'canal'){
@@ -677,13 +693,8 @@ function crash(S, v, cause, imp, nx, nz){
     wx: (R() - 0.5) * (4 + 14 * big), wy: (R() - 0.5) * (3 + 8 * big), wz: (R() - 0.5) * (4 + 12 * big) + (R() < 0.5 ? -4 : 4) * big,
     kaboom: v.powder > 0, lost: lost.length};
   v.vx = v.vz = v.vy = 0; v.boosting = false; v.drift = 0;
-  var cost = Math.round(800 + imp * 260);
-  S.crashes++; S.damage += cost;
-  S.rep = Math.max(0, S.rep - 0.03 * lost.length);
-  v.stats.crashes++;
-  var p = person(S, v.owner, v.owner ? v.name : null); if(p) p.crashes++;
-  if(!S.best.crash || imp > S.best.crash.imp) S.best.crash = {imp: imp, name: v.name, owner: v.owner, cause: cause, lost: lost.length, street: v.street};
-  emit(S, {k: 'crash', v: v.i, cause: cause, imp: imp, x: v.x, y: v.y, z: v.z, vx: vx, vz: vz, lost: lost, kaboom: v.powder > 0, cost: cost});
+  emit(S, {k: 'crash', v: v.i, cause: cause, imp: imp, x: v.x, y: v.y, z: v.z, vx: vx, vz: vz, lost: lost, kaboom: v.powder > 0, cost: cost, car: S.hitCar || null});
+  S.hitCar = null;
 }
 
 function crashTick(S, v){
@@ -1070,13 +1081,14 @@ function vanVsCars(S, v){
         v.boost = Math.min(1, v.boost + 0.1);
         v.stats.near++;
         var p = person(S, v.owner, v.owner ? v.name : null); if(p) p.near++;
-        emit(S, {k: 'near', v: v.i, x: c.x, z: c.z, rel: rel});
+        emit(S, {k: 'near', v: v.i, x: c.x, z: c.z, rel: rel, car: c.id});
       }
       continue;
     }
     var relN = (v.vx - cvx) * hit.nx + (v.vz - cvz) * hit.nz;
     if(-relN > CRASH_CAR && v.ghost <= 0){
       wreckCar(S, c, v, -relN);
+      S.hitCar = c.id;
       crash(S, v, 'car', -relN, hit.nx, hit.nz);
       return;
     }
@@ -1097,7 +1109,7 @@ function wreckCar(S, c, v, imp){
 function vanVsVans(S){
   for(var i = 0; i < S.vans.length; i++) for(var j = i + 1; j < S.vans.length; j++){
     var a = S.vans[i], b = S.vans[j];
-    if(a.crash || b.crash || a.ghost > 0 || b.ghost > 0) continue;
+    if(a.crash || b.crash || a.ghost > 0 || b.ghost > 0 || a.remote || b.remote) continue;
     var dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz);
     if(d > 3.4 || d < 1e-4 || Math.abs(a.y - b.y) > 2) continue;
     var nx = dx / d, nz = dz / d, pen = 3.4 - d;
@@ -1326,6 +1338,14 @@ function step(S){
   for(var i = 0; i < S.vans.length; i++){
     var v = S.vans[i];
     if(v.ghost > 0) v.ghost -= DT;
+    if(v.remote){
+      // a phone drives this one: it sends where the van is; the TV still
+      // routes it, loads it, wilts its flowers and lets the goons at it
+      routeTick(S, v);
+      if(!v.crash) vanStops(S, v);
+      if(S.R() < 0.02) v.street = S.M.streetAt(v.x, v.z) || v.street;
+      continue;
+    }
     if(v.crash){ crashTick(S, v); continue; }
     routeTick(S, v);
     if(!v.owner) aiDrive(S, v);
@@ -1342,6 +1362,92 @@ function step(S){
   S.pings.forEach(function(p){ p.t -= DT; });
   S.pings = S.pings.filter(function(p){ return p.t > 0; });
   if(S.t >= S.dayLen) endDay(S);
+}
+
+/* ---------------- vans driven by phones ---------------- */
+/* The phone runs its own van (WSim.local / localStep) so the steering never
+   waits on the wifi, and tells the TV where it is ~30 times a second. */
+function remoteState(S, i, a){
+  var v = S.vans[i]; if(!v || !v.remote || !a) return;
+  var ox = v.x, oz = v.z;
+  v.x = +a[0]; v.z = +a[1]; v.y = +a[2]; v.h = +a[3]; v.vx = +a[4]; v.vz = +a[5]; v.vy = +a[6]; v.yaw = +a[7];
+  v.boost = +a[8]; var f = a[9] | 0;
+  v.boosting = !!(f & 1); v.drift = (f & 2) ? 1 : 0; v.air = (f & 4) ? 0.5 : 0; v.ghost = (f & 8) ? 0.5 : 0;
+  v.powder = (f & 32) ? Math.max(v.powder, 0.1) : v.powder;
+  v.spd = Math.hypot(v.vx, v.vz);
+  if(v.spd > v.stats.top) v.stats.top = v.spd;
+  var jump = Math.hypot(v.x - ox, v.z - oz);
+  if(jump < 30) v.stats.dist += jump;
+  if(f & 16){
+    if(!v.crash) v.crash = {remote: true, t: 0, cause: 'crash', imp: 0, lost: 0, h: v.h};
+    v.crash.x = v.x; v.crash.z = v.z; v.crash.y = v.y;
+    v.crash.ax = +a[10] || 0; v.crash.ay = +a[11] || 0; v.crash.az = +a[12] || 0; v.crash.h = +a[13] || v.h;
+  } else if(v.crash && v.crash.remote) v.crash = null;
+}
+function remoteEvent(S, i, e){
+  var v = S.vans[i]; if(!v || !v.remote || !e || S.ph !== 'day') return;
+  switch(e.k){
+    case 'crash':
+      var cc = crashCargo(S, v, e.cause, +e.imp || 20);
+      v.crash = {remote: true, t: 0, cause: e.cause, imp: +e.imp || 20, lost: cc.lost.length, h: v.h, x: v.x, z: v.z, y: v.y, ax: 0, ay: 0, az: 0};
+      if(e.car != null){ var c = S.cars.filter(function(q){ return q.id === e.car; })[0]; if(c) wreckCar(S, c, v, +e.imp || 20); }
+      emit(S, {k: 'crash', v: v.i, cause: e.cause, imp: +e.imp || 20, x: v.x, y: v.y, z: v.z, vx: +e.vx || 0, vz: +e.vz || 0, lost: cc.lost, kaboom: !!e.kaboom, cost: cc.cost});
+      break;
+    case 'near':
+      v.stats.near++;
+      var p = person(S, v.owner, v.name); if(p) p.near++;
+      emit(S, {k: 'near', v: v.i, x: +e.x || v.x, z: +e.z || v.z, rel: +e.rel || 20});
+      break;
+    case 'smash':
+      var pr = S.M.props[e.p | 0]; if(!pr || S.broken[e.p | 0]) return;
+      S.broken[e.p | 0] = S.t + 60;
+      emit(S, {k: 'smash', p: e.p | 0, kind: pr.k, x: pr.x, z: pr.z, vx: v.vx, vz: v.vz});
+      break;
+    case 'land':
+      var air = Math.min(8, +e.air || 0);
+      v.stats.air += air;
+      if(!S.best.air || air > S.best.air.t) S.best.air = {t: air, name: v.name, owner: v.owner};
+      var pa = person(S, v.owner, v.name); if(pa) pa.air += air;
+      emit(S, {k: 'land', v: v.i, air: air, x: v.x, z: v.z});
+      break;
+    case 'respawn':
+      v.crash = null; v.routeT = 0;
+      emit(S, {k: 'respawn', v: v.i});
+      break;
+  }
+}
+
+/* A phone's own copy: the town, its van and the traffic it is told about. */
+function local(M, v){
+  var L = {M: M, local: true, R: root.WMap.rng(7), t: 0, q: [], ev: [], cars: [], broken: {}, dust: 0, gust: {x: 0, z: 0, t: 0},
+    vans: [], best: {}, ppl: {}, orders: [], hitCar: null};
+  return L;
+}
+function localVan(L, x, z, h){
+  var v = {i: 0, owner: 'me', name: 'me', x: x, z: z, y: 0, vy: 0, h: h || 0, vx: 0, vz: 0, yaw: 0, g: 0,
+    st: 0, gas: 0, brk: 0, bst: 0, boost: 0.35, boosting: false, drift: 0, driftT: 0, powder: 0,
+    air: 0, ghost: 1.5, crash: null, cargo: [], tgt: null, spd: 0, street: '',
+    stats: {del: 0, perfect: 0, crashes: 0, near: 0, air: 0, top: 0, drift: 0, goons: 0, dist: 0, money: 0, boosts: 0}};
+  L.vans = [v];
+  return v;
+}
+function localStep(L){
+  L.ev = L.q; L.q = [];
+  L.t += DT;
+  var v = L.vans[0]; if(!v) return;
+  if(v.ghost > 0) v.ghost -= DT;
+  if(v.powder > 0) v.powder = Math.max(0, v.powder - DT);
+  if(v.crash){ crashTick(L, v); return; }
+  vanPhysics(L, v);
+  if(!v.crash) vanVsCars(L, v);
+}
+/* the numbers a phone sends: see remoteState */
+function packVan(v){
+  var f = (v.boosting ? 1 : 0) | (v.drift ? 2 : 0) | (v.air > 0.3 ? 4 : 0) | (v.ghost > 0 ? 8 : 0) | (v.crash ? 16 : 0) | (v.powder > 0 ? 32 : 0);
+  var r = function(n, k){ return Math.round(n * k) / k; };
+  var a = [r(v.x, 100), r(v.z, 100), r(v.y, 100), r(v.h, 1000), r(v.vx, 100), r(v.vz, 100), r(v.vy, 100), r(v.yaw, 1000), r(v.boost, 1000), f];
+  if(v.crash) a.push(r(v.crash.ax, 100), r(v.crash.ay, 100), r(v.crash.az, 100), r(v.crash.h, 100));
+  return a;
 }
 
 /* ---------------- what the phones are told ---------------- */
@@ -1392,6 +1498,7 @@ root.WSim = {
   create: create, addVan: addVan, setOwner: setOwner, input: input, start: start, step: step, act: act,
   snap: snap, vanInfo: vanInfo, startParade: startParade, tempAt: tempAt, heat01: heat01, orderById: orderById,
   recipes: recipes, targetPoint: targetPoint, tossTarget: tossTarget, wrapA: wrapA, person: person,
-  STATE_CODE: STATE_CODE
+  STATE_CODE: STATE_CODE, remoteState: remoteState, remoteEvent: remoteEvent, local: local, localVan: localVan,
+  localStep: localStep, packVan: packVan, carPos: carPos, sigGreen: sigGreen
 };
 })(typeof window !== 'undefined' ? window : globalThis);

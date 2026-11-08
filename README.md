@@ -2,7 +2,7 @@
 
 A family co-op delivery game. The TV is Mesa and Gilbert, Arizona; every
 phone is a job at Watson's Flowers on Main Street (est. 1927): drive a van
-(tilt to steer), toss bouquets onto porches, arrange them, grow them,
+(tilt to steer, on your own phone), toss bouquets onto porches, arrange them, grow them,
 dispatch, or sell roses from Irene's cart. Beat the heat, dodge the Gilbert
 Goons, outrun the haboob, then ride in the Gilbert Days Parade.
 
@@ -13,4 +13,7 @@ Enter and drive with the arrow keys.
 
 - Map data © OpenStreetMap contributors, ODbL (roads, freeways and canals,
   squeezed 5x; the neighbourhoods are invented).
+- Flower photos: public domain (CC0 / Public Domain Mark) via Openverse:
+  rawpixel and a Flickr photo from Allan Gardens, Toronto. Sources in
+  `web/flowers/credits.json`.
 - three.js (MIT), PeerJS.

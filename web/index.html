@@ -28,9 +28,11 @@
 <script src="sim.js"></script>
 <script src="net.js"></script>
 <script src="qr.js"></script>
+<script src="bouquet.js"></script>
 <script type="module">
 import * as THREE from './lib/three.module.min.js';
 import {buildWorld, makeSign, labelTex, canvas as mkCanvas, tex} from './world.js';
+import {createView} from './view.js';
 
 /* Watson's Flowers - the TV.
 
@@ -122,7 +124,7 @@ function away(p){
 }
 function seatBack(p){
   const S = G.S;
-  if(p.role === 'drive' && p.van >= 0 && S.vans[p.van] && !S.vans[p.van].owner){ SIM.setOwner(S, p.van, p.id, p.name); }
+  if(p.role === 'drive' && p.van >= 0 && S.vans[p.van] && !S.vans[p.van].owner){ SIM.setOwner(S, p.van, p.id, p.name, true); sendDrv(p); }
   tellYou(p);
 }
 function release(p){
@@ -150,6 +152,12 @@ function tellYou(p){
   send(p, {t: 'you', role: p.role, van: p.van, name: p.name, id: p.id, ph: G.phase, drv, vans, hol: SAVE.holiday});
 }
 function tellAll(){ Object.values(NET.people).forEach(tellYou); }
+/* a driver's phone takes the van from here */
+function sendDrv(p){
+  const S = G.S, v = p.van >= 0 && S.vans[p.van];
+  if(!v || !p.conn) return;
+  send(p, {t: 'drv', i: v.i, x: v.x, z: v.z, h: v.crash ? v.crash.h || v.h : v.h, color: v.color, boost: v.boost});
+}
 
 /* picking a job */
 function pick(p, role, opt){
@@ -163,9 +171,10 @@ function pick(p, role, opt){
       let v = S.vans.findIndex(q => !q.owner);
       if(v < 0) v = SIM.addVan(S, p.id, p.name);
       if(v < 0){ p.role = null; send(p, {t: 'full'}); tellYou(p); return; }
-      SIM.setOwner(S, v, p.id, p.name);
+      SIM.setOwner(S, v, p.id, p.name, true);
       p.van = v;
-      buildVanMesh(v);
+      syncVans();
+      sendDrv(p);
     } else {
       if(drivers().length > SIM.MAX_VANS){ p.role = null; send(p, {t: 'full'}); }
       p.van = -1;
@@ -187,6 +196,8 @@ function onPhone(p, d){
     case 'pick': pick(p, d.role, d); break;
     case 'name': p.name = cleanName(d.name) || p.name; if(p.role === 'drive' && S.vans[p.van] && S.vans[p.van].owner === p.id){ S.vans[p.van].name = p.name; refreshTag(p.van); } tellAll(); break;
     case 'in': if(p.role === 'drive') p.inp = d; break;
+    case 'vs': if(p.role === 'drive' && p.van >= 0 && S.vans[p.van] && S.vans[p.van].owner === p.id) SIM.remoteState(S, p.van, d.a); break;
+    case 've': if(p.role === 'drive' && p.van >= 0 && S.vans[p.van] && S.vans[p.van].owner === p.id) SIM.remoteEvent(S, p.van, d.e); break;
     case 'act': {
       const a = d.a; if(!a || !a.a) return;
       const ok = {
@@ -242,6 +253,7 @@ function startDay(){
   const S = G.S = SIM.create(M, {seed: (Date.now() & 0xffff) + 1, holiday: SAVE.holiday});
   drivers().slice(0, SIM.MAX_VANS).forEach(p => {
     const v = SIM.addVan(S, p.conn ? p.id : null, p.name);
+    if(p.conn) SIM.setOwner(S, v, p.id, p.name, true);
     p.van = v;
   });
   if(!S.vans.length) SIM.addVan(S, null, 'Computer');
@@ -252,6 +264,7 @@ function startDay(){
   rebuildVans();
   clearFx();
   tellAll();
+  drivers().forEach(sendDrv);
   musicMode('day');
 }
 function endOfDay(){
@@ -354,7 +367,7 @@ addEventListener('keyup', e => { G.kbd[e.code] = false; });
 addEventListener('blur', () => { G.kbd = {}; });
 addEventListener('pointerdown', () => soundOn());
 
-/* ---------------- three.js ---------------- */
+/* ---------------- three.js: the action cam, the lobby, the parade ---------------- */
 const glc = document.getElementById('gl');
 // ?norender=1: run everything but the 3D drawing (netcheck, on a machine with no GPU)
 const NORENDER = /(^|[?&])norender=1(&|$)/.test(location.search);
@@ -366,6 +379,7 @@ renderer.toneMappingExposure = 1.05;
 renderer.autoClear = false;
 const scene = new THREE.Scene();
 const world = buildWorld(scene, M);
+const V = createView(scene, M);
 const hud = document.getElementById('hud'), H = hud.getContext('2d');
 let VW = 0, VH = 0, DPR = 1;
 function resize(){
@@ -373,349 +387,24 @@ function resize(){
   VW = innerWidth; VH = innerHeight;
   renderer.setSize(VW, VH, false);
   hud.width = Math.round(VW * DPR); hud.height = Math.round(VH * DPR);
+  mapCache = null;
 }
 addEventListener('resize', resize);
-resize();
+WBouquet.load(() => { bqCache = {}; rebuildVans(); });
 
-/* ---------------- vans ---------------- */
-function liveryTex(color){
-  const c = mkCanvas(512, 256), g = c.getContext('2d');
-  g.fillStyle = '#fbfbf7'; g.fillRect(0, 0, 512, 256);
-  g.fillStyle = '#f2a7b4'; g.fillRect(0, 150, 512, 60);
-  g.fillStyle = color; g.fillRect(0, 210, 512, 14);
-  g.fillStyle = '#1b1b1b'; g.beginPath(); g.ellipse(170, 80, 128, 58, 0, 0, Math.PI * 2); g.fill();
-  g.fillStyle = '#f6f3ea'; g.beginPath(); g.ellipse(170, 80, 120, 50, 0, 0, Math.PI * 2); g.fill();
-  g.fillStyle = '#151515'; g.font = 'italic bold 66px "Brush Script MT", "Segoe Script", cursive'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillText("Watson's", 170, 86);
-  g.font = 'bold 50px "Arial Black", Impact, sans-serif'; g.lineWidth = 6; g.strokeStyle = '#7a4a10'; g.strokeText('FLOWERS', 256, 181); g.fillStyle = '#f2c531'; g.fillText('FLOWERS', 256, 181);
-  // a blossom
-  g.save(); g.translate(400, 74);
-  for(let i = 0; i < 5; i++){ g.rotate(Math.PI * 2 / 5); g.fillStyle = '#f7cfd6'; g.beginPath(); g.ellipse(0, -24, 16, 24, 0, 0, Math.PI * 2); g.fill(); }
-  g.fillStyle = '#f2c531'; g.beginPath(); g.arc(0, 0, 10, 0, Math.PI * 2); g.fill(); g.restore();
-  g.fillStyle = '#555'; g.font = 'bold 18px Georgia'; g.fillText('The Best Since 1927', 400, 128);
-  return tex(c);
+/* vans, as the view draws them */
+function syncVans(){
+  G.S.vans.forEach((v, i) => V.van(i, v.color, v.name));
 }
-function frontTex(){
-  const c = mkCanvas(256, 256), g = c.getContext('2d');
-  g.fillStyle = '#fbfbf7'; g.fillRect(0, 0, 256, 256);
-  g.fillStyle = '#26323d'; g.fillRect(14, 20, 228, 100);
-  g.fillStyle = '#ddd'; g.fillRect(40, 170, 176, 30);
-  g.fillStyle = '#fff6c8'; g.fillRect(8, 160, 40, 26); g.fillRect(208, 160, 40, 26);
-  return tex(c);
-}
-function backTex(color){
-  const c = mkCanvas(256, 256), g = c.getContext('2d');
-  g.fillStyle = '#fbfbf7'; g.fillRect(0, 0, 256, 256);
-  g.fillStyle = '#26323d'; g.fillRect(30, 30, 80, 60); g.fillRect(146, 30, 80, 60);
-  g.fillStyle = '#999'; g.fillRect(126, 20, 4, 220);
-  g.fillStyle = '#d0202a'; g.fillRect(8, 150, 26, 40); g.fillRect(222, 150, 26, 40);
-  g.fillStyle = color; g.font = 'bold 30px Georgia'; g.textAlign = 'center'; g.fillText('Fragile!', 128, 220);
-  g.fillStyle = '#333'; g.font = 'bold 18px Georgia'; g.fillText('How am I driving?', 128, 130);
-  return tex(c);
-}
-const FRONT = frontTex();
-const vanObjs = [];
-const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.3, 14).rotateX(Math.PI / 2);
-const wheelMat = new THREE.MeshLambertMaterial({color: '#1c1c1c'});
-function buildVanMesh(i){
-  const S = G.S, v = S.vans[i];
-  if(!v) return;
-  if(vanObjs[i]){ scene.remove(vanObjs[i].grp); }
-  const grp = new THREE.Group();
-  const body = new THREE.Group(); grp.add(body);
-  const liv = liveryTex(v.color);
-  const white = new THREE.MeshLambertMaterial({color: '#fbfbf7'});
-  const mats = [new THREE.MeshLambertMaterial({map: FRONT}), new THREE.MeshLambertMaterial({map: backTex(v.color)}), white, new THREE.MeshLambertMaterial({color: '#333'}),
-                new THREE.MeshLambertMaterial({map: liv}), new THREE.MeshLambertMaterial({map: liv})];
-  const box = new THREE.Mesh(new THREE.BoxGeometry(4.4, 2.3, 2.15), mats);
-  box.position.set(-0.55, 1.6, 0); body.add(box);
-  const hood = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.0, 2.05), [white, white, white, white, white, white]);
-  hood.position.set(2.2, 0.95, 0); body.add(hood);
-  const glass = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.9, 1.9), new THREE.MeshLambertMaterial({color: '#26323d'}));
-  glass.position.set(1.66, 1.95, 0); glass.rotation.z = -0.35; body.add(glass);
-  const stripe = new THREE.Mesh(new THREE.BoxGeometry(5.6, 0.12, 2.18), new THREE.MeshLambertMaterial({color: v.color}));
-  stripe.position.set(0, 0.5, 0); body.add(stripe);
-  const wheels = [];
-  [[1.85, 1.05], [1.85, -1.05], [-1.9, 1.05], [-1.9, -1.05]].forEach(([x, z]) => {
-    const w = new THREE.Mesh(wheelGeo, wheelMat); w.position.set(x, 0.42, z); body.add(w); wheels.push(w);
-  });
-  // boost flames
-  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.35, 2.2, 10).rotateZ(Math.PI / 2), new THREE.MeshBasicMaterial({color: '#7fd0ff', transparent: true, opacity: 0.85}));
-  flame.position.set(-3.6, 0.7, 0.6); body.add(flame);
-  const flame2 = flame.clone(); flame2.position.z = -0.6; body.add(flame2);
-  // a shadow
-  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(6, 2.8).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({color: '#000', transparent: true, opacity: 0.35, depthWrite: false}));
-  shadow.position.y = 0.07;
-  scene.add(shadow);
-  // the name, for the other drivers
-  const tag = new THREE.Sprite(new THREE.SpriteMaterial({depthTest: false, transparent: true}));
-  tag.scale.set(6, 1.5, 1); tag.position.set(0, 4.6, 0); grp.add(tag);
-  // where it is going: a beam at the porch and a line along the road
-  const beam = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 60, 16, 1, true).translate(0, 30, 0), new THREE.MeshBasicMaterial({color: v.color, transparent: true, opacity: 0.25, depthWrite: false, side: THREE.DoubleSide}));
-  const ring = new THREE.Mesh(new THREE.RingGeometry(1.6, 2.2, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({color: v.color, transparent: true, opacity: 0.9, depthWrite: false}));
-  ring.position.y = 0.15;
-  const mark = new THREE.Group(); mark.add(beam, ring); scene.add(mark);
-  const ribbon = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({color: v.color, transparent: true, opacity: 0.55, depthWrite: false}));
-  ribbon.frustumCulled = false;
-  scene.add(ribbon);
-  scene.add(grp);
-  const cam = new THREE.PerspectiveCamera(68, 1, 0.8, 6000);
-  cam.position.set(v.x - 10, 5, v.z);
-  vanObjs[i] = {grp, body, wheels, flame, flame2, tag, mark, ribbon, routeRef: null, cam, shadow, camYaw: v.h, shake: 0, fov: 68, msgs: [], color: v.color, orbit: 0};
-  refreshTag(i);
-}
-function refreshTag(i){
-  const o = vanObjs[i], v = G.S.vans[i]; if(!o || !v) return;
-  const c = mkCanvas(256, 64), g = c.getContext('2d');
-  g.fillStyle = 'rgba(0,0,0,0.45)'; roundRect(g, 4, 8, 248, 48, 20); g.fill();
-  g.fillStyle = v.color; g.font = 'bold 32px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillText(v.name.slice(0, 14), 128, 33);
-  if(o.tag.material.map) o.tag.material.map.dispose();
-  o.tag.material.map = tex(c); o.tag.material.needsUpdate = true;
-  o.tagName = v.name;
-}
-function rebuildVans(){
-  vanObjs.forEach(o => { if(o){ scene.remove(o.grp); scene.remove(o.mark); scene.remove(o.ribbon); scene.remove(o.shadow); } });
-  vanObjs.length = 0;
-  G.S.vans.forEach((v, i) => buildVanMesh(i));
-}
-function routeRibbon(o, v){
-  if(o.routeRef === v.route) return;
-  o.routeRef = v.route;
-  const r = v.route; if(!r || r.length < 2){ o.ribbon.visible = false; return; }
-  o.ribbon.visible = true;
-  const pos = [], idx = [];
-  for(let k = 0; k < r.length - 1; k++){
-    const a = r[k], b = r[k + 1];
-    const L = Math.hypot(b.x - a.x, b.z - a.z); if(L < 0.1) continue;
-    const nx = -(b.z - a.z) / L * 0.9, nz = (b.x - a.x) / L * 0.9;
-    const base = pos.length / 3;
-    pos.push(a.x + nx, 0.2, a.z + nz, b.x + nx, 0.2, b.z + nz, b.x - nx, 0.2, b.z - nz, a.x - nx, 0.2, a.z - nz);
-    idx.push(base, base + 2, base + 1, base, base + 3, base + 2);
-  }
-  o.ribbon.geometry.dispose();
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setIndex(idx);
-  o.ribbon.geometry = g;
-}
-
-/* ---------------- traffic ---------------- */
-const CAR_COLORS = ['#c8312f', '#2f5fc8', '#e8e8e8', '#222222', '#9aa3ad', '#2f8a4c', '#d8b23a', '#6b3fa0', '#f2f2f2', '#8a2b2b'];
-function carGeo(kind){
-  const parts = [];
-  function bx(w, h, d, x, y, z, shade){ const g = new THREE.BoxGeometry(w, h, d).translate(x, y, z); const n = g.attributes.position.count; const c = new Float32Array(n * 3).fill(shade); g.setAttribute('color', new THREE.BufferAttribute(c, 3)); parts.push(g); }
-  if(kind === 'car'){ bx(4.6, 0.8, 1.9, 0, 0.75, 0, 1); bx(2.4, 0.7, 1.7, -0.2, 1.5, 0, 0.35); }
-  else if(kind === 'pickup'){ bx(5.4, 0.9, 2.0, 0, 0.85, 0, 1); bx(1.8, 0.8, 1.9, 0.9, 1.7, 0, 0.35); }
-  else if(kind === 'truck'){ bx(2, 2, 2.3, 2.6, 1.3, 0, 1); bx(5.3, 2.8, 2.5, -1.0, 1.9, 0, 1.25); }
-  else { bx(11, 2.8, 2.6, 0, 1.8, 0, 1.15); bx(10.6, 0.8, 2.62, 0, 2.3, 0, 0.3); }
-  [[1.5, 0.9], [1.5, -0.9], [-1.5, 0.9], [-1.5, -0.9]].forEach(([x, z]) => bx(0.8, 0.8, 0.3, x * (kind === 'bus' ? 3 : kind === 'truck' ? 1.6 : 1), 0.4, z * 1.05, 0.08));
-  // merge
-  let n = 0; parts.forEach(g => n += g.attributes.position.count);
-  const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), col = new Float32Array(n * 3), idx = [];
-  let o = 0;
-  parts.forEach(g => { pos.set(g.attributes.position.array, o * 3); nor.set(g.attributes.normal.array, o * 3); col.set(g.attributes.color.array, o * 3); for(let i = 0; i < g.index.count; i++) idx.push(g.index.array[i] + o); o += g.attributes.position.count; });
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setIndex(idx);
-  return g;
-}
-const traffic = {};
-['car', 'pickup', 'truck', 'bus'].forEach(k => {
-  const im = new THREE.InstancedMesh(carGeo(k), new THREE.MeshLambertMaterial({vertexColors: true}), 160);
-  im.count = 0; im.frustumCulled = false;
-  scene.add(im);
-  traffic[k] = im;
-});
-const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _p = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1), _c = new THREE.Color();
-function drawTraffic(S){
-  const n = {car: 0, pickup: 0, truck: 0, bus: 0};
-  S.cars.forEach(c => {
-    const im = traffic[c.kind]; const i = n[c.kind]++;
-    if(i >= 160) return;
-    if(c.wreck){ _e.set(c.wreck.ax, -c.h + c.wreck.ay, c.wreck.az, 'YXZ'); _p.set(c.x, c.wreck.y, c.z); }
-    else { _e.set(0, -c.h, 0); _p.set(c.x, 0, c.z); }
-    _q.setFromEuler(_e); _m.compose(_p, _q, _s);
-    im.setMatrixAt(i, _m);
-    im.setColorAt(i, _c.set(c.kind === 'bus' ? '#f2f2f2' : c.kind === 'truck' ? '#ececec' : CAR_COLORS[c.color % CAR_COLORS.length]));
-  });
-  Object.keys(traffic).forEach(k => { const im = traffic[k]; im.count = Math.min(160, n[k]); im.instanceMatrix.needsUpdate = true; if(im.instanceColor) im.instanceColor.needsUpdate = true; });
-}
-
-/* ---------------- goons ---------------- */
-const HOODIES = ['#2b2b2b', '#c43c3c', '#3c6fc4', '#3ca85a', '#e2a33a', '#8a4fc4'];
-const goonPool = [];
-function goonMesh(){
-  const g = new THREE.Group();
-  const deck = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.12, 0.3), new THREE.MeshLambertMaterial({color: '#222'})); deck.position.y = 0.2; g.add(deck);
-  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.1), new THREE.MeshLambertMaterial({color: '#aaa'})); stem.position.set(0.5, 0.75, 0); stem.rotation.z = -0.15; g.add(stem);
-  const legs = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.8, 0.35), new THREE.MeshLambertMaterial({color: '#3a4a6a'})); legs.position.set(0, 0.7, 0); g.add(legs);
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.7, 0.5), new THREE.MeshLambertMaterial({color: '#c43c3c'})); torso.position.set(0.05, 1.42, 0); g.add(torso);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8), new THREE.MeshLambertMaterial({color: '#e2b48c'})); head.position.set(0.08, 1.95, 0); g.add(head);
-  const hood = new THREE.Mesh(new THREE.SphereGeometry(0.23, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2), torso.material); hood.position.set(0.04, 1.97, 0); g.add(hood);
-  const loot = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.6, 8).rotateZ(Math.PI), new THREE.MeshLambertMaterial({color: '#f3a6c0'})); loot.position.set(0.3, 1.5, 0.35); g.add(loot);
-  g.userData = {torso, loot};
-  scene.add(g);
-  return g;
-}
-function drawGoons(S, t){
-  let i = 0;
-  S.goons.forEach(gn => {
-    if(gn.st === 'gone') return;
-    const g = goonPool[i] || (goonPool[i] = goonMesh()); i++;
-    g.visible = true;
-    g.userData.torso.material.color.set(HOODIES[gn.color % HOODIES.length]);
-    g.userData.loot.visible = gn.carry != null;
-    if(gn.st === 'flung'){ g.position.set(gn.x, gn.y, gn.z); g.rotation.set(gn.spin, -gn.h, gn.spin * 0.7); }
-    else { g.position.set(gn.x, M.height(gn.x, gn.z), gn.z); g.rotation.set(0, -gn.h, Math.sin(t * 6 + gn.id) * 0.06); }
-  });
-  for(; i < goonPool.length; i++) goonPool[i].visible = false;
-}
-
-/* ---------------- bouquets in the air, and on porches ---------------- */
-function bouquetMesh(ri){
-  const g = new THREE.Group();
-  const rec = SIM.recipes(G.S)[ri] || SIM.recipes(G.S)[0];
-  const wrap = SIM.WRAPS.find(w => w.k === rec.wrap) || SIM.WRAPS[0];
-  const cone = new THREE.Mesh(new THREE.ConeGeometry(0.38, 1.0, 10).rotateZ(Math.PI).translate(0, 0.5, 0), new THREE.MeshLambertMaterial({color: wrap.c}));
-  g.add(cone);
-  const fl = Object.keys(rec.st);
-  for(let k = 0; k < 7; k++){
-    const f = SIM.FLOWERS.find(x => x.k === fl[k % fl.length]);
-    const b = new THREE.Mesh(new THREE.SphereGeometry(0.17, 8, 6), new THREE.MeshLambertMaterial({color: f.c}));
-    b.position.set(Math.cos(k * 2.4) * 0.22, 1.05 + (k % 3) * 0.08, Math.sin(k * 2.4) * 0.22);
-    g.add(b);
-  }
-  return g;
-}
-const flying = [], porches = [];
-function addShot(e){
-  const m = bouquetMesh(e.ri);
-  scene.add(m);
-  flying.push({m, x0: e.x, z0: e.z, tx: e.tx, tz: e.tz, T: e.T, t: 0, y0: e.k === 'ptoss' ? 4 : 2.2});
-}
-function drawFlying(dt){
-  for(let i = flying.length - 1; i >= 0; i--){
-    const f = flying[i]; f.t += dt;
-    const u = Math.min(1, f.t / f.T);
-    const y = f.y0 * (1 - u) + 0.3 * u + Math.sin(u * Math.PI) * (3 + f.T * 2.5);
-    f.m.position.set(f.x0 + (f.tx - f.x0) * u, y, f.z0 + (f.tz - f.z0) * u);
-    f.m.rotation.set(u * 9, u * 4, 0);
-    if(u >= 1){ scene.remove(f.m); flying.splice(i, 1); }
-  }
-  for(let i = porches.length - 1; i >= 0; i--){ porches[i].t -= dt; if(porches[i].t <= 0){ scene.remove(porches[i].m); porches.splice(i, 1); } }
-}
-function leaveOnPorch(e){
-  const m = bouquetMesh(e.ri);
-  m.position.set(e.x, 0.05, e.z); m.rotation.set(Math.PI / 2 * 0.9, Math.random() * 6, 0);
-  scene.add(m); porches.push({m, t: 40});
-  if(porches.length > 40){ scene.remove(porches[0].m); porches.shift(); }
-}
-
-/* ---------------- petals, smoke, fire, water ---------------- */
-const PET_MAX = 5000;
-const petals = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.28, 0.2), new THREE.MeshLambertMaterial({side: THREE.DoubleSide}), PET_MAX);
-petals.count = 0; petals.frustumCulled = false;
-petals.setColorAt(0, new THREE.Color('#fff'));
-scene.add(petals);
-const P = [];   // {x,y,z,vx,vy,vz,rx,ry,wx,wy,life,c,s}
-function burst(x, y, z, vx, vz, n, colors, spread){
-  for(let i = 0; i < n; i++){
-    if(P.length >= PET_MAX) P.shift();
-    const a = Math.random() * Math.PI * 2, sp = Math.random() * (spread || 9);
-    P.push({x, y: y + Math.random(), z, vx: vx * 0.5 + Math.cos(a) * sp, vy: 3 + Math.random() * 9, vz: vz * 0.5 + Math.sin(a) * sp,
-      rx: Math.random() * 6, ry: Math.random() * 6, wx: (Math.random() - 0.5) * 14, wy: (Math.random() - 0.5) * 14,
-      life: 22 + Math.random() * 10, c: colors[i % colors.length], s: 0.7 + Math.random() * 0.8});
-  }
-}
-function flowerColors(ris){
-  const out = [];
-  (ris.length ? ris : [0]).forEach(ri => {
-    const r = SIM.recipes(G.S)[ri] || SIM.recipes(G.S)[0];
-    Object.keys(r.st).forEach(k => { const f = SIM.FLOWERS.find(x => x.k === k); out.push(f.c, f.c, f.c2); });
-  });
-  return out;
-}
-const _col = new THREE.Color();
-function drawPetals(dt, wind){
-  let n = 0;
-  for(let i = P.length - 1; i >= 0; i--){
-    const p = P[i];
-    p.life -= dt;
-    if(p.life <= 0){ P.splice(i, 1); continue; }
-    if(p.y > 0.05){
-      p.vy -= 9 * dt;
-      const drag = Math.exp(-1.6 * dt);
-      p.vx = p.vx * drag + wind.x * dt; p.vz = p.vz * drag + wind.z * dt;
-      if(p.vy < -2.5) p.vy = -2.5;
-      p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
-      p.rx += p.wx * dt; p.ry += p.wy * dt;
-      if(p.y <= 0.05){ p.y = 0.05; p.rx = Math.PI / 2; }
-    }
-  }
-  for(let i = 0; i < P.length; i++){
-    const p = P[i];
-    const s = p.s * Math.min(1, p.life / 3);
-    _e.set(p.rx, p.ry, 0); _q.setFromEuler(_e); _p.set(p.x, p.y, p.z); _s.set(s, s, s);
-    _m.compose(_p, _q, _s); petals.setMatrixAt(n, _m); petals.setColorAt(n, _col.set(p.c)); n++;
-  }
-  _s.set(1, 1, 1);
-  petals.count = n;
-  petals.instanceMatrix.needsUpdate = true;
-  if(petals.instanceColor) petals.instanceColor.needsUpdate = true;
-}
-// smoke and dust puffs
-const SM_MAX = 400;
-const smoke = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), new THREE.MeshLambertMaterial({transparent: true, opacity: 0.55, flatShading: true, depthWrite: false}), SM_MAX);
-smoke.count = 0; smoke.frustumCulled = false; smoke.setColorAt(0, new THREE.Color('#fff'));
-scene.add(smoke);
-const SM = [];
-function puff(x, y, z, n, color, size, up){
-  for(let i = 0; i < n; i++){
-    if(SM.length >= SM_MAX) SM.shift();
-    SM.push({x: x + (Math.random() - 0.5) * 2, y: y + Math.random(), z: z + (Math.random() - 0.5) * 2, vx: (Math.random() - 0.5) * 3, vy: (up || 1.5) * (0.5 + Math.random()), vz: (Math.random() - 0.5) * 3,
-      s: (size || 1) * (0.6 + Math.random() * 0.6), life: 1.5 + Math.random() * 1.5, max: 3, c: color || '#cfc6b8'});
-  }
-}
-function drawSmoke(dt){
-  let n = 0;
-  for(let i = SM.length - 1; i >= 0; i--){ const p = SM[i]; p.life -= dt; if(p.life <= 0){ SM.splice(i, 1); continue; } p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt; p.s += dt * 1.2; }
-  SM.forEach(p => { const s = p.s * Math.min(1, p.life); _m.makeScale(s, s, s).setPosition(p.x, p.y, p.z); smoke.setMatrixAt(n, _m); smoke.setColorAt(n, _col.set(p.c)); n++; });
-  smoke.count = n; smoke.instanceMatrix.needsUpdate = true; if(smoke.instanceColor) smoke.instanceColor.needsUpdate = true;
-}
-// fireballs and splashes
-const booms = [];
-function fireball(x, y, z, size, color){
-  const m = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({color: color || '#ffa63a', transparent: true, opacity: 0.95}));
-  m.position.set(x, y, z); scene.add(m);
-  booms.push({m, t: 0, T: 0.9, size: size || 6});
-  const light = new THREE.PointLight(color || '#ffa63a', 40, 60);
-  light.position.set(x, y + 3, z); scene.add(light);
-  booms.push({light, t: 0, T: 0.6});
-}
-function geyser(x, z, h){
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 4, 1, 16, 1, true).translate(0, 0.5, 0), new THREE.MeshLambertMaterial({color: '#cfeff2', transparent: true, opacity: 0.8, side: THREE.DoubleSide}));
-  m.position.set(x, -1.5, z); scene.add(m);
-  booms.push({m, t: 0, T: 3, geyser: h || 28});
-}
-function drawBooms(dt){
-  for(let i = booms.length - 1; i >= 0; i--){
-    const b = booms[i]; b.t += dt;
-    const u = b.t / b.T;
-    if(b.light){ b.light.intensity = 40 * (1 - u); if(u >= 1){ scene.remove(b.light); booms.splice(i, 1); } continue; }
-    if(b.geyser){ const h = b.geyser * Math.sin(Math.min(1, u * 1.4) * Math.PI) ; b.m.scale.set(1 + u, Math.max(0.1, h), 1 + u); b.m.material.opacity = 0.8 * (1 - u * 0.7); if(Math.random() < 0.5) burst(b.m.position.x, Math.max(0, h * 0.8), b.m.position.z, 0, 0, 3, ['#d9f4f7', '#ffffff', '#9fdde3'], 6); }
-    else { const s = b.size * (0.4 + u * 1.2); b.m.scale.setScalar(s); b.m.material.opacity = 0.95 * (1 - u); b.m.material.color.set(u < 0.3 ? '#fff2a0' : '#ff7a2a'); }
-    if(u >= 1){ scene.remove(b.m); booms.splice(i, 1); }
-  }
-}
+function refreshTag(i){ const v = G.S.vans[i]; if(v) V.tag(i, v.name); }
+function rebuildVans(){ V.dropAll(); syncVans(); }
+let brokenShown = {};
 function clearFx(){
-  P.length = 0; SM.length = 0;
-  flying.forEach(f => scene.remove(f.m)); flying.length = 0;
-  porches.forEach(f => scene.remove(f.m)); porches.length = 0;
-  booms.forEach(b => { if(b.m) scene.remove(b.m); if(b.light) scene.remove(b.light); }); booms.length = 0;
+  V.clear();
   M.props.forEach((p, i) => world.setProp(i, true));
   brokenShown = {};
+  G.feat = null;
 }
-let brokenShown = {};
 
 /* ---------------- pings from dispatch ---------------- */
 const pingObjs = [];
@@ -726,7 +415,7 @@ function drawPings(S, t){
       o = new THREE.Mesh(new THREE.CylinderGeometry(2, 2, 80, 12, 1, true).translate(0, 40, 0), new THREE.MeshBasicMaterial({color: '#ff3a3a', transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide}));
       scene.add(o); pingObjs[i] = o;
     }
-    o.visible = true; o.position.set(p[0] != null ? p[0] : p.x, 0, p[1] != null ? p[1] : p.z);
+    o.visible = true; o.position.set(p.x, 0, p.z);
     o.material.opacity = 0.2 + 0.15 * Math.sin(t * 8);
   });
   for(let i = S.pings.length; i < pingObjs.length; i++) pingObjs[i].visible = false;
@@ -737,15 +426,20 @@ let parade = null;
 function buildParade(){
   const S = G.S, Pd = S.parade, l = M.gilbertLine;
   const grp = new THREE.Group();
-  // the truck
   const truck = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.8, 5), new THREE.MeshLambertMaterial({color: '#e8e8e8'}));
   truck.position.set(0, 1.2, 8); grp.add(truck);
-  // the float: a pink deck heaped with flowers, a sign, and a girl waving on top
   const deck = new THREE.Mesh(new THREE.BoxGeometry(4.4, 1.2, 10), new THREE.MeshLambertMaterial({color: '#f2a7b4'}));
   deck.position.set(0, 1.2, -1); grp.add(deck);
-  for(let i = 0; i < 70; i++){
-    const f = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 6), new THREE.MeshLambertMaterial({color: ['#ffffff', '#f7cfd6', '#d81b3c', '#f6c21c', '#ef7fa6'][i % 5]}));
-    f.position.set((Math.random() - 0.5) * 4.2, 1.9 + Math.random() * 0.4, -1 + (Math.random() - 0.5) * 9.6); grp.add(f);
+  // the float is heaped with the real flowers
+  const keys = ['rose', 'sunflower', 'mum', 'lily', 'carnation', 'daisy'];
+  for(let i = 0; i < 46; i++){
+    const im = WBouquet.img[keys[i % keys.length]];
+    if(!im || !im.naturalWidth) continue;
+    const t = new THREE.Texture(im); t.needsUpdate = true; t.colorSpace = THREE.SRGBColorSpace;
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({map: t, transparent: true}));
+    sp.scale.set(1.1, 1.1 * im.naturalHeight / im.naturalWidth, 1);
+    sp.position.set((Math.random() - 0.5) * 4, 2.1 + Math.random() * 0.5, -1 + (Math.random() - 0.5) * 9.4);
+    grp.add(sp);
   }
   const sign = makeSign(world.signTex); sign.scale.setScalar(0.32); sign.rotation.y = Math.PI / 2; sign.position.set(0, 1.6, -4.5); grp.add(sign);
   const girl = new THREE.Group();
@@ -757,7 +451,6 @@ function buildParade(){
   girl.position.set(0, 1.85, 1.5); grp.add(girl);
   grp.userData = {arm, girl};
   scene.add(grp);
-  // the crowd on both sidewalks
   const people = [];
   for(let z = Pd.z0 - 10; z < Pd.z0 + Pd.speed * Pd.dur + 40; z += 1.6) [-1, 1].forEach(sd => {
     if(Math.random() < 0.25) return;
@@ -765,10 +458,12 @@ function buildParade(){
   });
   const crowd = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.3, 1, 4, 8).translate(0, 0.8, 0), new THREE.MeshLambertMaterial({color: '#fff'}), people.length);
   const SHIRT = ['#c8312f', '#2f5fc8', '#f2c531', '#2f8a4c', '#f2f2f2', '#ef7fa6', '#8a4fc4', '#e8781e'];
-  people.forEach((p, i) => { crowd.setColorAt(i, _c.set(SHIRT[p.c])); });
+  const c = new THREE.Color();
+  people.forEach((p, i) => { crowd.setColorAt(i, c.set(SHIRT[p.c])); });
   scene.add(crowd);
   parade = {grp, crowd, people, cam: new THREE.PerspectiveCamera(60, 1, 0.8, 6000)};
 }
+const _pm = new THREE.Matrix4();
 function drawParade(dt, t){
   if(!parade) return;
   const Pd = G.S.parade;
@@ -777,132 +472,144 @@ function drawParade(dt, t){
   parade.people.forEach((p, i) => {
     p.j = Math.max(0, p.j - dt * 2);
     const hop = Math.abs(Math.sin(t * 10 + i)) * p.j * 0.8;
-    _m.makeScale(1, p.h / 1.6, 1).setPosition(p.x, hop, p.z);
-    parade.crowd.setMatrixAt(i, _m);
+    _pm.makeScale(1, p.h / 1.6, 1).setPosition(p.x, hop, p.z);
+    parade.crowd.setMatrixAt(i, _pm);
   });
   parade.crowd.instanceMatrix.needsUpdate = true;
-  parade.crowd.instanceColor.needsUpdate = true;
 }
-function cheerNear(x, z){
-  if(!parade) return;
-  parade.people.forEach(p => { if(Math.hypot(p.x - x, p.z - z) < 6) p.j = 1; });
-}
+function cheerNear(x, z){ if(parade) parade.people.forEach(p => { if(Math.hypot(p.x - x, p.z - z) < 6) p.j = 1; }); }
 
 /* ---------------- events from the simulation ---------------- */
 function vanName(i){ const v = G.S.vans[i]; return v ? v.name : 'A van'; }
 function nameOf(id){ const p = NET.people[id] || G.S.ppl[id]; return p ? p.name : 'Someone'; }
-function msg(i, text, color, big){
-  const o = vanObjs[i]; if(!o) return;
-  o.msgs.push({text, color: color || '#fff', t: 0, big: !!big});
-  if(o.msgs.length > 4) o.msgs.shift();
-}
 function ticker(text, color){ G.ticker.push({text, color: color || '#fff', t: 0}); if(G.ticker.length > 6) G.ticker.shift(); }
 function phoneFx(vanI, k, extra){
   Object.values(NET.people).forEach(p => { if((p.role === 'drive' || p.role === 'toss') && p.van === vanI) send(p, Object.assign({t: 'fx', k}, extra || {})); });
 }
+/* the action cam goes where the action is */
+function feature(i, secs, why, color){
+  const S = G.S; if(!S.vans[i]) return;
+  if(G.feat && G.feat.until > wallT && G.feat.prio > secs && G.feat.i !== i) return;
+  G.feat = {i, until: wallT + secs, why, color: color || '#fff', prio: secs, t0: wallT};
+}
+/* what each driver's phone gets told about (near its van) */
+const pendingEv = {};
+const LOOK = {crash: 1, carhit: 1, smash: 1, land: 1, toss: 1, boom: 1, goonhit: 1, splash: 1, mist: 1, thud: 1};
+function shareEvent(e){
+  if(!LOOK[e.k] || e.x == null) return;
+  Object.values(NET.people).forEach(p => {
+    if(p.role !== 'drive' || p.van < 0) return;
+    const v = G.S.vans[p.van]; if(!v) return;
+    if((e.k === 'crash' || e.k === 'smash' || e.k === 'thud') && e.v === p.van) return;   // it saw its own
+    if(Math.hypot(e.x - v.x, e.z - v.z) > 320) return;
+    const q = pendingEv[p.id] || (pendingEv[p.id] = []);
+    if(q.length < 30) q.push(e);
+  });
+}
 function onEvent(e){
-  const S = G.S, o = e.v != null ? vanObjs[e.v] : null;
+  const S = G.S;
+  if(!NORENDER){ V.holiday = S.holiday; V.event(e); }
+  shareEvent(e);
   switch(e.k){
     case 'count': cue('count'); break;
     case 'go': cue('go'); ticker("Watson's is open!", '#f2c531'); break;
-    case 'crash': {
-      const cols = flowerColors(e.lost);
-      burst(e.x, e.y + 1.5, e.z, e.vx, e.vz, 220 + e.lost.length * 120, e.lost.length ? cols : ['#e8e8e8', '#cccccc', '#f2a7b4'], 10);
-      puff(e.x, e.y + 0.5, e.z, 14, '#8a8a8a', 1.6, 2);
-      if(e.cause === 'canal'){ burst(e.x, 0, e.z, 0, 0, 160, ['#d9f4f7', '#ffffff', '#9fdde3'], 7); sfx('splash'); }
-      if(e.kaboom){ fireball(e.x, e.y + 1, e.z, 9); sfx('boom'); }
-      if(o){ o.shake = 1.4; o.orbit = 0; }
-      if(e.cause === 'canal') msg(e.v, 'IN THE CANAL!', '#7fe0ff', true);
-      if(e.lost.length) msg(e.v, e.lost.length + (e.lost.length > 1 ? ' bouquets' : ' bouquet') + ' everywhere', '#f2a7b4');
+    case 'crash':
+      feature(e.v, 5, e.cause === 'canal' ? 'IN THE CANAL!' : 'CRASH!', '#ff5a5a');
       sfx(e.cause === 'canal' ? 'splash' : 'crash', e.imp);
-      phoneFx(e.v, 'crash');
+      if(e.kaboom) sfx('boom');
+      phoneFx(e.v, 'crash', {lost: e.lost});
       ticker(vanName(e.v) + ' crashed' + (e.cause === 'canal' ? ' into the canal' : '') + (e.lost.length ? ' - ' + e.lost.length + ' bouquets everywhere' : ''), '#ff8a8a');
+      mapFx.push({x: e.x, z: e.z, t: 0, k: 'crash', n: e.lost.length});
       break;
-    }
-    case 'carhit': puff(e.x, 0.5, e.z, 6, '#9a9a9a'); burst(e.x, 1, e.z, 0, 0, 30, ['#c9c9c9', '#888', '#2a2a2a'], 6); break;
-    case 'thud': puff(e.x, 0.3, e.z, 4, '#c8b49a'); sfx('thud'); break;
-    case 'bump': if(o){ o.shake = Math.min(1, e.imp / 12); } sfx('bump', e.imp); break;
-    case 'smash': {
-      const col = e.kind === 'bin' ? ['#2f6b3f', '#e8e8e8', '#7a6a5a'] : e.kind === 'bush' ? ['#7a9a4a', '#5f7f3a'] : e.kind === 'bale' ? ['#d8b45a', '#e8c86a'] : ['#8d8d8d', '#bbb'];
-      burst(e.x, 0.8, e.z, e.vx, e.vz, 24, col, 5);
-      world.setProp(e.p, false); brokenShown[e.p] = true;
-      sfx('smash');
-      break;
-    }
-    case 'near': msg(e.v, 'NEAR MISS!', '#7fe0ff'); sfx('whoosh'); phoneFx(e.v, 'near'); break;
-    case 'air': msg(e.v, 'AIRTIME!', '#ffd23f'); break;
-    case 'land': {
+    case 'thud': sfx('thud'); break;
+    case 'bump': sfx('bump', e.imp); break;
+    case 'smash': world.setProp(e.p, false); brokenShown[e.p] = true; sfx('smash'); break;
+    case 'near': feature(e.v, 1.6, 'NEAR MISS!', '#7fe0ff'); sfx('whoosh'); break;
+    case 'land':
       if(e.how){
-        // a bouquet landing
         const vv = e.v;
-        if(e.how === 'miss'){
-          burst(e.x, 0.6, e.z, 0, 0, 60, flowerColors([e.ri]), 4);
-          msg(vv, 'MISSED! Back to the shop for another', '#ff8a8a'); sfx('miss');
-          ticker((e.who ? nameOf(e.who) : vanName(vv)) + ' missed the porch', '#ff8a8a');
-        } else {
-          burst(e.x, 0.6, e.z, 0, 0, e.how === 'perfect' ? 60 : 30, flowerColors([e.ri]), 3);
-          if(e.how !== 'lawn') leaveOnPorch(e); else leaveOnPorch(e);
-          const label = e.how === 'perfect' ? 'ON THE PORCH!' : e.how === 'porch' ? 'Delivered!' : 'On the lawn...';
-          msg(vv, label + '  $' + e.pay, e.how === 'perfect' ? '#7dff6b' : '#fff', e.how === 'perfect');
-          if(e.mult > 1) msg(vv, e.mult >= 2 ? 'BLUR-BY! x2' : 'DRIVE-BY! x1.5', '#ffd23f');
-          if(e.fresh < 0.4) msg(vv, 'a bit wilted...', '#d9a35a');
+        if(e.how === 'miss'){ sfx('miss'); ticker((e.who ? nameOf(e.who) : vanName(vv)) + ' missed the porch', '#ff8a8a'); }
+        else {
           sfx(e.how === 'perfect' ? 'perfect' : e.how === 'porch' ? 'porch' : 'lawn');
-          ticker((e.who && e.who !== G.S.vans[vv].owner ? nameOf(e.who) : vanName(vv)) + ' delivered to ' + e.cust + ' - $' + e.pay, '#b8ffb0');
+          if(e.how === 'perfect') feature(vv, 2.5, 'ON THE PORCH!  $' + e.pay, '#7dff6b');
+          ticker((e.who && e.who !== (S.vans[vv] && S.vans[vv].owner) ? nameOf(e.who) : vanName(vv)) + ' delivered to ' + e.cust + ' - $' + e.pay, '#b8ffb0');
+          mapFx.push({x: e.x, z: e.z, t: 0, k: 'paid', pay: e.pay});
         }
         phoneFx(vv, 'land', {how: e.how, pay: e.pay});
-      } else if(e.air > 0.9){ msg(e.v, (e.air).toFixed(1) + 's of air!', '#ffd23f'); sfx('thud'); puff(e.x, 0.2, e.z, 5, '#c8b49a'); }
+      } else if(e.air > 1){ feature(e.v, 3, e.air.toFixed(1) + 's OF AIR!', '#ffd23f'); sfx('thud'); }
       break;
-    }
-    case 'toss': addShot(e); sfx('toss'); break;
+    case 'toss': sfx('toss'); break;
     case 'nothing': phoneFx(e.v, 'nothing'); break;
-    case 'load': msg(e.v, 'Loaded ' + e.n + (e.n > 1 ? ' bouquets' : ' bouquet'), '#f2a7b4'); sfx('load'); phoneFx(e.v, 'load', {n: e.n}); break;
-    case 'mist': msg(e.v, 'Misters! Flowers perk up', '#9fe8ff'); sfx('mist'); puff(e.x, 2.5, e.z, 10, '#ffffff', 1.4, 0.3); break;
-    case 'ice': msg(e.v, 'ICE! Fresh as a daisy', '#9fe8ff'); sfx('load'); break;
-    case 'powder': msg(e.v, 'BLACK POWDER!', '#ff7a1a', true); sfx('fuse'); phoneFx(e.v, 'powder'); puff(e.x, 1, e.z, 8, '#555', 1, 3); break;
+    case 'load': sfx('load'); phoneFx(e.v, 'load', {n: e.n}); break;
+    case 'mist': sfx('mist'); phoneFx(e.v, 'mist'); break;
+    case 'ice': sfx('load'); phoneFx(e.v, 'ice'); break;
+    case 'powder': sfx('fuse'); phoneFx(e.v, 'powder'); feature(e.v, 4, 'BLACK POWDER!', '#ff7a1a'); break;
     case 'boom':
-      fireball(e.x, 0, e.z, 16); geyser(e.x, e.z, 30); sfx('boom'); sfx('splash');
-      msg(e.v, "GRANDPA'S CANAL BLAST! +$100", '#ff7a1a', true);
+      sfx('boom'); sfx('splash');
+      feature(e.v, 6, "GRANDPA'S CANAL BLAST!", '#ff7a1a');
       ticker(e.name + " set off Grandpa's black powder at the canal. Just like 1950-something.", '#ffb27a');
       phoneFx(e.v, 'boom');
+      mapFx.push({x: e.x, z: e.z, t: 0, k: 'boom'});
       break;
     case 'goons': ticker('School is out. The Gilbert Goons are on their scooters.', '#ffb3b3'); cue('goons'); break;
-    case 'gooned': msg(e.v, 'GOONED! ' + e.name + ' took a bouquet', '#ff5a5a', true); sfx('goon'); phoneFx(e.v, 'gooned'); ticker(e.name + ' swiped a bouquet off ' + vanName(e.v), '#ff8a8a'); break;
-    case 'goonhit': burst(e.x, 1.2, e.z, 0, 0, 20, ['#ffffff', '#c43c3c'], 5); msg(e.v, e.rec ? 'GOT IT BACK! +$5' : 'GOON DOWN! +$5', '#7dff6b'); sfx('bonk'); break;
+    case 'gooned': feature(e.v, 3, 'GOONED! ' + e.name + ' took a bouquet', '#ff5a5a'); sfx('goon'); phoneFx(e.v, 'gooned'); ticker(e.name + ' swiped a bouquet off ' + vanName(e.v), '#ff8a8a'); break;
+    case 'goonhit': feature(e.v, 2.5, e.rec ? 'GOT IT BACK!' : 'GOON DOWN!', '#7dff6b'); sfx('bonk'); phoneFx(e.v, 'goonhit', {rec: e.rec}); break;
     case 'getaway': ticker(e.name + ' got away with a bouquet', '#ff8a8a'); break;
-    case 'splash': burst(e.x, 0, e.z, 0, 0, 40, ['#d9f4f7', '#ffffff'], 4); sfx('splash'); break;
+    case 'splash': sfx('splash'); break;
     case 'haboob': ticker('HABOOB! A wall of dust is rolling in off the desert', '#e0b07a'); cue('haboob'); break;
     case 'rush': ticker('RUSH: ' + e.n + ' orders at once!', '#f2c531'); sfx('bell'); break;
-    case 'ready': if(e.who) ticker(nameOf(e.who) + ' finished ' + Math.round(e.q * 100) + '% arrangement', '#f7cfd6'); sfx('ding'); break;
+    case 'ready': if(e.who) ticker(nameOf(e.who) + ' finished an arrangement - ' + Math.round(e.q * 100) + '%', '#f7cfd6'); sfx('ding'); break;
     case 'walkin': ticker(nameOf(e.who) + ' sold a walk-in bouquet, $' + e.pay, '#f7cfd6'); sfx('cash'); break;
     case 'cancel': if(e.kind === 'del') ticker(e.who + ' gave up waiting and cancelled', '#ff8a8a'); break;
     case 'rose': ticker(e.name + ' sold a rose', '#ff9ab0'); sfx('rose'); break;
     case 'harvest': ticker(nameOf(e.who) + ' cut ' + SIM.FLOWERS[e.f].name.toLowerCase() + ' from the garden', '#b8ffb0'); break;
     case 'ping': ticker('Dispatch: ' + (e.kind === 'goon' ? 'goons spotted!' : 'look here!'), '#ff8a8a'); sfx('ping'); break;
     case 'assign': ticker('Dispatch sent ' + vanName(e.v) + ' a priority order', '#f2c531'); break;
-    case 'respawn': if(o) o.orbit = 0; break;
-    case 'gust': break;
     case 'parade': ticker('The Gilbert Days Parade! Everybody: swipe to throw flowers to the crowd', '#f7cfd6'); cue('cheer'); break;
-    case 'ptoss': addShot(Object.assign({}, e, {ri: Math.floor(Math.random() * 5)})); sfx('toss'); break;
-    case 'pland': if(e.hit){ cheerNear(e.tx != null ? e.tx : e.x, e.tz != null ? e.tz : e.z); burst(e.x, 1.5, e.z, 0, 0, 20, ['#ffffff', '#f7cfd6', '#d81b3c'], 3); sfx('cheer'); } break;
+    case 'ptoss': sfx('toss'); break;
+    case 'pland': if(e.hit){ cheerNear(e.x, e.z); sfx('cheer'); } break;
   }
 }
 
-/* ---------------- layout ---------------- */
-function layout(n){
-  const W = VW, Hh = VH, top = 46;
-  const h = Hh - top;
-  if(n <= 1) return {views: [[0, top, W, h]], map: [W - 300, Hh - 230, 280, 210]};
-  if(n === 2) return {views: [[0, top, W / 2, h], [W / 2, top, W / 2, h]], map: [W / 2 - 140, Hh - 200, 280, 190]};
-  if(n === 3) return {views: [[0, top, W / 2, h / 2], [W / 2, top, W / 2, h / 2], [0, top + h / 2, W / 2, h / 2]], map: [W / 2 + 10, top + h / 2 + 10, W / 2 - 20, h / 2 - 20], big: true};
-  if(n === 4) return {views: [[0, top, W / 2, h / 2], [W / 2, top, W / 2, h / 2], [0, top + h / 2, W / 2, h / 2], [W / 2, top + h / 2, W / 2, h / 2]], map: [W / 2 - 110, top + h / 2 - 80, 220, 160]};
-  const w3 = W / 3;
-  const v = [[0, top, w3, h / 2], [w3, top, w3, h / 2], [2 * w3, top, w3, h / 2], [0, top + h / 2, w3, h / 2], [w3, top + h / 2, w3, h / 2], [2 * w3, top + h / 2, w3, h / 2]].slice(0, n);
-  return {views: v, map: n === 5 ? [2 * w3 + 10, top + h / 2 + 10, w3 - 20, h / 2 - 20] : [W / 2 - 100, top + h / 2 - 75, 200, 150], big: n === 5};
+/* ---------------- each driver's phone: the world around its van ---------------- */
+function worldTick(){
+  const S = G.S;
+  const live = G.phase === 'day' || G.phase === 'count';
+  const pk = M.pickups.filter(q => (S.pickupT[q.id] || 0) > S.t || (q.k === 'boom' && S.boomUsed)).map(q => q.id);
+  if(S.boomUsed) pk.push(-1);
+  const br = Object.keys(S.broken).map(Number);
+  const r1 = n => Math.round(n * 10) / 10, r2 = n => Math.round(n * 100) / 100;
+  Object.values(NET.people).forEach(p => {
+    if(p.role !== 'drive' || !p.conn) return;
+    const v = p.van >= 0 && S.vans[p.van];
+    const w = {t: 'w', st: r2(S.t), clk: r2(S.clock), dust: r2(S.dust), gx: r1(S.gust.x), gz: r1(S.gust.z), ph: live ? S.ph : G.phase, hol: S.holiday, br, pk};
+    if(v){
+      w.cars = [];
+      S.cars.forEach(c => {
+        if(Math.abs(c.x - v.x) > 280 || Math.abs(c.z - v.z) > 280) return;
+        const a = [c.id, r1(c.x), r1(c.z), r2(c.h), r1(c.v), SIM.CAR_KINDS.findIndex(k => k.k === c.kind), c.color];
+        if(c.wreck) a.push(r2(c.wreck.y), r2(c.wreck.ax), r2(c.wreck.ay), r2(c.wreck.az));
+        w.cars.push(a);
+      });
+      w.vans = S.vans.filter(o => o !== v).map(o => {
+        const a = [o.i, r1(o.x), r1(o.z), r2(o.y), r2(o.crash && o.crash.h != null ? o.crash.h : o.h), o.i, o.name];
+        if(o.crash) a.push(r2(o.crash.ax || 0), r2(o.crash.ay || 0), r2(o.crash.az || 0));
+        return a;
+      });
+      w.goons = S.goons.filter(g => g.st !== 'gone' && Math.abs(g.x - v.x) < 280 && Math.abs(g.z - v.z) < 280)
+        .map(g => [r1(g.x), r2(g.y || 0), r1(g.z), r2(g.h), g.st === 'flung' ? 2 : g.st === 'flee' ? 1 : 0, r2(g.spin || 0), g.color, g.carry != null ? 1 : 0]);
+      w.tgt = v.tgt ? {k: v.tgt.k, id: v.tgt.id} : null;
+    }
+    if(pendingEv[p.id] && pendingEv[p.id].length){ w.ev = pendingEv[p.id]; pendingEv[p.id] = []; }
+    send(p, w);
+  });
 }
 
 /* ---------------- drawing ---------------- */
 const overview = new THREE.PerspectiveCamera(50, 1, 1, 6000);
+const actionCam = new THREE.PerspectiveCamera(66, 16 / 9, 0.8, 6000);
 let frameT = performance.now(), wallT = 0, frameDt = 1 / 60;
+const mapFx = [];
 function frame(){
   requestAnimationFrame(frame);
   const now = performance.now(), dt = Math.min(0.1, (now - frameT) / 1000);
@@ -913,54 +620,27 @@ function frame(){
   const dust = G.phase === 'day' || G.phase === 'end' ? S.dust : 0;
   const wind = {x: S.gust.x * dust * 2, z: S.gust.z * dust * 2};
 
-  drawTraffic(S);
-  drawGoons(S, wallT);
-  drawFlying(dt);
-  drawPetals(dt, wind);
-  drawSmoke(dt);
-  drawBooms(dt);
-  drawPings(S, wallT);
-  drawParade(dt, wallT);
-  world.updateLights(S);
-  world.updatePickups(S, wallT);
-  // props come back after a minute
-  if(Math.random() < 0.05) Object.keys(brokenShown).forEach(id => { if(!S.broken[id]){ world.setProp(+id, true); delete brokenShown[id]; } });
-  if(world.water) world.water.position.y = Math.sin(wallT * 0.8) * 0.05;
+  if(!NORENDER){
+    V.traffic(S.cars);
+    V.goons(S.goons.filter(g => g.st !== 'gone'), wallT);
+    V.tick(dt, wind);
+    drawPings(S, wallT);
+    drawParade(dt, wallT);
+    world.updateLights(S);
+    world.updatePickups(S, wallT);
+    if(Math.random() < 0.05) Object.keys(brokenShown).forEach(id => { if(!S.broken[id]){ world.setProp(+id, true); delete brokenShown[id]; } });
+    S.vans.forEach((v, i) => {
+      const o = V.van(i, v.color, v.name);
+      const x = v.px != null ? v.px + (v.x - v.px) * alpha : v.x, z = v.pz != null ? v.pz + (v.z - v.pz) * alpha : v.z;
+      const y = v.py != null ? v.py + (v.y - v.py) * alpha : v.y;
+      let h = v.h; if(v.ph != null){ let d = v.h - v.ph; d = Math.atan2(Math.sin(d), Math.cos(d)); h = v.ph + d * alpha; }
+      v.rx = x; v.rz = z; v.ry = y; v.rh = h;
+      V.placeVan(i, {x, y, z, h, crash: v.crash, boosting: v.boosting, powder: v.powder > 0, drift: v.drift, spd: v.spd, ghost: v.ghost > 0 && G.phase === 'day', yaw: v.yaw, air: v.air > 0.3, vy: v.vy, vx: v.vx, vz: v.vz}, dt, wallT);
+      V.target(i, G.phase === 'day' ? SIM.targetPoint(S, v) : null, wallT);
+      V.route(i, G.phase === 'day' ? v.route : null);
+    });
+  }
 
-  // vans
-  S.vans.forEach((v, i) => {
-    const o = vanObjs[i] || (buildVanMesh(i), vanObjs[i]);
-    if(!o) return;
-    if(o.tagName !== v.name) refreshTag(i);
-    const x = v.px != null ? v.px + (v.x - v.px) * alpha : v.x, z = v.pz != null ? v.pz + (v.z - v.pz) * alpha : v.z;
-    const y = v.py != null ? v.py + (v.y - v.py) * alpha : v.y;
-    let h = v.h; if(v.ph != null){ let d = v.h - v.ph; d = Math.atan2(Math.sin(d), Math.cos(d)); h = v.ph + d * alpha; }
-    o.grp.position.set(x, y, z);
-    if(v.crash){ o.grp.rotation.set(v.crash.ax, -v.crash.h + v.crash.ay, v.crash.az, 'YXZ'); }
-    else {
-      // lean into turns and pitch with the slope
-      const lean = -v.yaw * Math.min(1, v.spd / 30) * 0.06 * (v.drift ? 2 : 1);
-      const pitch = v.air > 0.2 ? Math.max(-0.4, Math.min(0.3, v.vy * 0.03)) : 0;
-      o.grp.rotation.set(lean, -h, pitch, 'YXZ');
-    }
-    o.wheels.forEach(w => { w.rotation.z -= v.spd * dt / 0.42; });
-    const fl = v.boosting && !v.crash;
-    o.flame.visible = o.flame2.visible = fl;
-    if(fl){ const s = 0.8 + Math.random() * 0.5; o.flame.scale.set(s, 1, 1); o.flame2.scale.set(s, 1, 1); o.flame.material.color.set(v.powder > 0 ? '#ff8a2a' : '#7fd0ff'); }
-    o.body.visible = !(v.ghost > 0 && !v.crash && Math.floor(wallT * 12) % 2 === 0 && G.phase === 'day');
-    o.shadow.position.set(x, M.height(x, z) + 0.07, z); o.shadow.rotation.y = -h; o.shadow.material.opacity = Math.max(0.05, 0.35 - (y - M.height(x, z)) * 0.04);
-    // tyre smoke while drifting, dust off-road
-    if(v.drift && v.spd > 12 && Math.random() < 0.6) puff(x - Math.cos(h) * 2.2, 0.4, z - Math.sin(h) * 2.2, 1, '#e6e1d8', 0.8, 0.8);
-    if(v.powder > 0 && Math.random() < 0.5) puff(x - Math.cos(h) * 3, 1, z - Math.sin(h) * 3, 1, '#444', 0.9, 1.5);
-    // the porch beam
-    const tp = SIM.targetPoint(S, v);
-    o.mark.visible = !!tp && (G.phase === 'day');
-    if(tp){ o.mark.position.set(tp.x, 0, tp.z); o.mark.children[1].scale.setScalar(1 + 0.15 * Math.sin(wallT * 6)); }
-    routeRibbon(o, v);
-    o.ribbon.visible = G.phase === 'day' && !!v.route;
-  });
-
-  // render
   renderer.setScissorTest(false);
   renderer.setViewport(0, 0, VW, VH);
   renderer.clear();
@@ -968,23 +648,24 @@ function frame(){
   H.clearRect(0, 0, VW, VH);
 
   if(G.phase === 'day' || G.phase === 'count' || G.phase === 'end'){
-    const L = layout(S.vans.length);
-    S.vans.forEach((v, i) => {
-      const r = L.views[i]; if(!r) return;
-      const cam = chaseCam(v, vanObjs[i], dt, r[2] / r[3]);
-      world.update(hour, dust, wallT, cam.position);
+    const B = boardLayout();
+    // the action cam
+    const fi = featured();
+    const v = S.vans[fi];
+    if(v && !NORENDER){
+      const r = B.cam;
+      const s = {x: v.rx, y: v.ry, z: v.rz, h: v.rh, crash: v.crash, spd: v.spd, vx: v.vx, vz: v.vz, boosting: v.boosting, air: v.air > 0.3};
+      V.chase(actionCam, s, fi, dt, r[2] / r[3]);
+      world.update(hour, dust, wallT, actionCam.position);
       renderer.setScissorTest(true);
       renderer.setScissor(r[0], VH - r[1] - r[3], r[2], r[3]);
       renderer.setViewport(r[0], VH - r[1] - r[3], r[2], r[3]);
-      if(vanObjs[i]) vanObjs[i].tag.visible = false;
-      if(!NORENDER) renderer.render(scene, cam);
-      if(vanObjs[i]) vanObjs[i].tag.visible = true;
-    });
-    renderer.setScissorTest(false);
-    S.vans.forEach((v, i) => { const r = L.views[i]; if(r) drawVanHud(v, i, r); });
-    drawMinimap(L.map, L.big);
+      renderer.render(scene, actionCam);
+      renderer.setScissorTest(false);
+    }
+    drawBoard(B, dt);
     drawTopBar();
-    drawTicker();
+    drawTicker(B);
     if(G.phase === 'count') drawCountdown();
     if(G.phase === 'end') drawResults(false);
     if(G.paused) drawCenter('PAUSED', 'P or the pause button to carry on');
@@ -1002,7 +683,6 @@ function frame(){
     if(G.phase === 'parade') drawParadeHud(); else drawResults(true);
     drawTicker();
   } else {
-    // the lobby: around the sign at sunset
     const sg = M.watsonsSign;
     overview.aspect = VW / VH; overview.updateProjectionMatrix();
     const a = wallT * 0.08;
@@ -1014,38 +694,17 @@ function frame(){
   }
   if(document.getElementById('loading')) document.getElementById('loading').remove();
 }
-
-const _v3 = new THREE.Vector3();
-function chaseCam(v, o, dt, aspect){
-  const cam = o.cam;
-  const k = 1 - Math.exp(-dt * 7);
-  if(v.crash){
-    // the crash camera: swing slowly round the wreck
-    o.orbit += dt * 0.6;
-    const c = v.crash, a = -c.h + Math.PI * 0.75 + o.orbit;
-    _v3.set(c.x + Math.cos(a) * 11, c.y + 4.5, c.z + Math.sin(a) * 11);
-    cam.position.lerp(_v3, 1 - Math.exp(-dt * 4));
-    cam.lookAt(c.x, c.y + 1, c.z);
-    o.fov += (58 - o.fov) * k;
-  } else {
-    // follow the direction of travel more than the nose, so a drift shows
-    const sp = v.spd;
-    let want = v.h;
-    if(sp > 6){ const mv = Math.atan2(v.vz, v.vx); let d = mv - v.h; d = Math.atan2(Math.sin(d), Math.cos(d)); want = v.h + d * 0.55; }
-    let dy = want - o.camYaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
-    o.camYaw += dy * (1 - Math.exp(-dt * 6));
-    const back = 8.5 + Math.min(4, sp * 0.06), up = 3.4 + (v.air > 0.3 ? 2 : 0);
-    _v3.set(o.grp.position.x - Math.cos(o.camYaw) * back, o.grp.position.y + up, o.grp.position.z - Math.sin(o.camYaw) * back);
-    cam.position.lerp(_v3, 1 - Math.exp(-dt * 10));
-    const gy = M.height(cam.position.x, cam.position.z) + 1.2; if(cam.position.y < gy) cam.position.y = gy;
-    cam.lookAt(o.grp.position.x + Math.cos(o.camYaw) * 6, o.grp.position.y + 1.6, o.grp.position.z + Math.sin(o.camYaw) * 6);
-    const wantFov = 66 + Math.min(18, sp * 0.28) + (v.boosting ? 8 : 0);
-    o.fov += (wantFov - o.fov) * k;
-    if(v.boosting) o.shake = Math.max(o.shake, 0.18);
+/* which van the action cam is on */
+function featured(){
+  const S = G.S, n = S.vans.length;
+  if(!n) return 0;
+  if(G.feat && G.feat.until > wallT && S.vans[G.feat.i]) return G.feat.i;
+  // otherwise take turns, nine seconds each, the fastest first
+  if(!G.turn || wallT > G.turn.until || !S.vans[G.turn.i]){
+    const next = G.turn ? (G.turn.i + 1) % n : 0;
+    G.turn = {i: next, until: wallT + 9};
   }
-  if(o.shake > 0){ cam.position.x += (Math.random() - 0.5) * o.shake * 0.6; cam.position.y += (Math.random() - 0.5) * o.shake * 0.5; o.shake = Math.max(0, o.shake - dt * 2.5); }
-  cam.fov = o.fov; cam.aspect = aspect; cam.updateProjectionMatrix();
-  return cam;
+  return G.turn.i;
 }
 
 /* ---------------- the HUD ---------------- */
@@ -1074,10 +733,10 @@ function drawTopBar(){
   S.orders.forEach(o => { if(o.kind !== 'del') return; if(o.state === 'new') wait++; else if(o.state === 'arr') arr++; else if(o.state === 'ready') ready++; else if(o.state === 'van') inVan++; });
   txt(narrow ? 'Waiting ' + wait + ' · Ready ' + ready + ' · Vans ' + inVan : 'Orders ' + wait + '   Making ' + arr + '   Ready ' + ready + '   In vans ' + inVan, W - 14, 23, narrow ? 15 : 18, '#f7cfd6', 'right');
 }
-function drawTicker(){
+function drawTicker(B){
   const W = VW;
-  let y = VH - 16;
-  const cxT = W / 2;
+  let y = B ? B.map[1] + B.map[3] - 60 : VH - 16;
+  const cxT = B ? B.map[0] + B.map[2] / 2 + 60 : W / 2;
   for(let i = G.ticker.length - 1; i >= 0 && i >= G.ticker.length - 3; i--){
     const t = G.ticker[i];
     t.t += frameDt;
@@ -1092,133 +751,254 @@ function drawTicker(){
     y -= 30;
   }
 }
-function drawVanHud(v, i, r){
-  const S = G.S, o = vanObjs[i];
-  const [x, y, w, h] = r;
-  H.save();
-  H.beginPath(); H.rect(x, y, w, h); H.clip();
-  H.strokeStyle = 'rgba(0,0,0,0.8)'; H.lineWidth = 3; H.strokeRect(x, y, w, h);
-  const sc = Math.max(0.6, Math.min(1.2, Math.min(w / 640, h / 420)));
-  // name
-  panel(x + 10, y + 10, 200 * sc, 34 * sc);
-  H.fillStyle = v.color; H.beginPath(); H.arc(x + 26 * sc, y + 27 * sc, 8 * sc, 0, Math.PI * 2); H.fill();
-  txt(v.name.slice(0, 16), x + 40 * sc, y + 27 * sc, 18 * sc, '#fff');
-  // speed and boost
-  const mph = Math.round(v.spd * 2.237);
-  panel(x + 10, y + h - 86 * sc, 210 * sc, 76 * sc);
-  outlined(String(mph), x + 70 * sc, y + h - 52 * sc, 46 * sc, v.boosting ? '#7fd0ff' : '#fff');
-  txt('mph', x + 110 * sc, y + h - 40 * sc, 16 * sc, '#ccc');
-  H.fillStyle = 'rgba(255,255,255,0.15)'; H.fillRect(x + 22 * sc, y + h - 26 * sc, 186 * sc, 10 * sc);
-  H.fillStyle = v.powder > 0 ? '#ff7a1a' : v.boost > 0.99 ? '#ffffff' : '#7fd0ff'; H.fillRect(x + 22 * sc, y + h - 26 * sc, 186 * sc * (v.powder > 0 ? 1 : v.boost), 10 * sc);
-  txt('BOOST', x + 160 * sc, y + h - 52 * sc, 13 * sc, '#7fd0ff');
-  // cargo: six slots with freshness
-  const cw = 34 * sc;
-  panel(x + w - 10 - (cw + 6) * 6 - 10, y + h - 72 * sc, (cw + 6) * 6 + 10, 62 * sc);
-  for(let k = 0; k < SIM.CAP; k++){
-    const cx = x + w - 10 - (cw + 6) * (6 - k), cy = y + h - 64 * sc;
-    H.fillStyle = 'rgba(255,255,255,0.1)'; H.fillRect(cx, cy, cw, cw);
-    const id = v.cargo[k];
-    if(id != null){
-      const od = SIM.orderById(S, id);
-      if(od){
-        const rec = SIM.recipes(S)[od.ri];
-        const fl = Object.keys(rec.st);
-        fl.forEach((f, j) => { const F = SIM.FLOWERS.find(q => q.k === f); H.fillStyle = F.c; H.beginPath(); H.arc(cx + cw / 2 + Math.cos(j * 2.1) * cw * 0.2, cy + cw / 2 + Math.sin(j * 2.1) * cw * 0.2 - (1 - od.fresh) * 2, cw * 0.18, 0, Math.PI * 2); H.fill(); });
-        H.fillStyle = od.fresh > 0.6 ? '#7dff6b' : od.fresh > 0.3 ? '#ffd23f' : '#ff6a3a';
-        H.fillRect(cx, cy + cw + 3, cw * od.fresh, 4 * sc);
-      }
-    }
-  }
-  // where to
-  const tp = SIM.targetPoint(S, v);
-  if(tp && !v.crash){
-    const d = Math.hypot(tp.x - v.x, tp.z - v.z);
-    const label = v.tgt.k === 'house' ? M.houses[v.tgt.id].addr : M.shops[v.tgt.id].name + (S.orders.some(q => q.state === 'ready') ? ' - pick up' : ' - wait for flowers');
-    const cx = x + w / 2;
-    H.font = 'bold ' + Math.round(18 * sc) + 'px system-ui'; const lw = H.measureText(label).width;
-    const pw = lw + 130 * sc, px0 = cx - pw / 2;
-    panel(px0, y + 10, pw, 40 * sc);
-    txt(label, px0 + 46 * sc, y + 30 * sc, 18 * sc, '#fff', 'left');
-    txt(Math.round(d) + ' m', px0 + pw - 12 * sc, y + 30 * sc, 15 * sc, '#ccc', 'right');
-    if(v.street) txt(v.street, cx, y + 62 * sc, 14 * sc, 'rgba(255,255,255,0.85)', 'center');
-    // an arrow, turned the way to go relative to the camera
-    const cam = o.cam;
-    const ang = Math.atan2(tp.z - cam.position.z, tp.x - cam.position.x) - o.camYaw;
-    H.save(); H.translate(px0 + 22 * sc, y + 30 * sc); H.rotate(ang + Math.PI / 2);
-    H.fillStyle = v.color; H.beginPath(); H.moveTo(0, -14 * sc); H.lineTo(10 * sc, 10 * sc); H.lineTo(0, 4 * sc); H.lineTo(-10 * sc, 10 * sc); H.closePath(); H.fill();
-    H.restore();
-    // close to a porch: tell them to throw
-    const tt = SIM.tossTarget(S, v, 34);
-    if(tt) outlined(hasTosser(i) ? 'THROW IT!' : 'TOSS IT!', cx, y + 92 * sc, 28 * sc, '#ffd23f');
-  }
-  // messages
-  o.msgs.forEach((m, k) => {
-    m.t += frameDt;
-    if(m.t > 2.6) return;
-    const a = Math.min(1, (2.6 - m.t) * 2), yy = y + h * 0.36 + k * 34 * sc - m.t * 8;
-    H.globalAlpha = a;
-    outlined(m.text, x + w / 2, yy, (m.big ? 34 : 24) * sc * (m.t < 0.15 ? 1 + (0.15 - m.t) * 3 : 1), m.color);
-    H.globalAlpha = 1;
-  });
-  o.msgs = o.msgs.filter(m => m.t < 2.6);
-  if(v.crash){
-    const lost = v.crash.lost;
-    outlined('CRASH', x + w / 2, y + h * 0.22, 54 * sc, '#ff5a5a');
-    txt('Insurance claim: $' + Math.round(800 + v.crash.imp * 260).toLocaleString(), x + w / 2, y + h * 0.22 + 44 * sc, 18 * sc, '#ffd0d0', 'center');
-  }
-  if(!v.owner && G.phase === 'day') txt(w > 700 ? 'computer driving - pick Driver on a phone to take over' : 'computer driving', x + w / 2, y + h - 100 * sc, 14 * sc, 'rgba(255,255,255,0.75)', 'center');
-  H.restore();
+/* ---------------- the board: the town, the drivers, the shop ---------------- */
+function boardLayout(){
+  const top = 54, pad = 14;
+  const mapW = Math.round(VW * 0.6) - pad * 1.5;
+  const map = [pad, top, mapW, VH - top - pad];
+  const cx = pad + mapW + pad, cw = VW - cx - pad;
+  let ch = Math.round(cw * 9 / 16);
+  ch = Math.min(ch, Math.round((VH - top) * 0.42));
+  const cam = [cx, top, cw, ch];
+  const restY = top + ch + 10, restH = VH - restY - pad;
+  const n = Math.max(1, G.S.vans.length);
+  const cardsH = Math.min(restH * 0.58, Math.ceil(n / 2) * 96);
+  return {map, cam, cards: [cx, restY, cw, cardsH], shop: [cx, restY + cardsH + 8, cw, restH - cardsH - 8]};
 }
-function hasTosser(i){ return Object.values(NET.people).some(p => p.role === 'toss' && p.van === i && p.conn); }
-
-let mapBase = null;
-function buildMapBase(){
-  const s = 0.12, w = Math.ceil(M.W * s), h = Math.ceil(M.H * s);
-  const c = mkCanvas(w, h), g = c.getContext('2d');
-  g.fillStyle = '#c9a77a'; g.fillRect(0, 0, w, h);
-  g.fillStyle = '#7d9a55'; M.cells.forEach(cl => { if(cl.type === 'homes' || cl.type === 'grandpa' || cl.type === 'park') g.fillRect(cl.x0 * s, cl.z0 * s, (cl.x1 - cl.x0) * s, (cl.z1 - cl.z0) * s); });
-  g.strokeStyle = '#3d8f8a'; g.lineWidth = 2;
-  M.canals.forEach(cn => { g.beginPath(); cn.pts.forEach((p, i) => i ? g.lineTo(p[0] * s, p[1] * s) : g.moveTo(p[0] * s, p[1] * s)); g.stroke(); });
+let mapCache = null, bqCache = {};
+function bouquetPic(ri, w){
+  const hol = G.S.holiday, key = hol + ':' + ri + ':' + w;
+  if(bqCache[key]) return bqCache[key];
+  const r = SIM.HOLIDAYS[hol].recipes[ri] || SIM.HOLIDAYS[hol].recipes[0];
+  return (bqCache[key] = WBouquet.canvas(WBouquet.fromRecipe(r, ri + 3), w));
+}
+const benchCache = {};
+function benchPic(o, w){
+  const key = o.id + ':' + o.arr.st.join(',') + (o.arr.wrap || '') + (o.arr.rib || '');
+  if(benchCache[o.id] && benchCache[o.id].key === key) return benchCache[o.id].c;
+  const c = WBouquet.canvas({st: o.arr.st, wrap: o.arr.wrap, rib: o.arr.rib, seed: o.id}, w);
+  benchCache[o.id] = {key, c};
+  return c;
+}
+function mapScale(r){
+  const s = Math.min(r[2] / (M.bounds.x1 - M.bounds.x0), r[3] / (M.bounds.z1 - M.bounds.z0));
+  const w = (M.bounds.x1 - M.bounds.x0) * s, h = (M.bounds.z1 - M.bounds.z0) * s;
+  return {s, ox: r[0] + (r[2] - w) / 2 - M.bounds.x0 * s, oy: r[1] + (r[3] - h) / 2 - M.bounds.z0 * s, w, h, x0: r[0] + (r[2] - w) / 2, y0: r[1] + (r[3] - h) / 2};
+}
+function buildMap(r){
+  const ms = mapScale(r), k = DPR;
+  const c = mkCanvas(Math.ceil(ms.w * k), Math.ceil(ms.h * k)), g = c.getContext('2d');
+  g.scale(k, k); g.translate(-ms.x0 + ms.ox, -ms.y0 + ms.oy); g.scale(ms.s, ms.s);
+  const s = ms.s;
+  g.fillStyle = '#d8bf93'; g.fillRect(M.bounds.x0, M.bounds.z0, M.bounds.x1 - M.bounds.x0, M.bounds.z1 - M.bounds.z0);
+  M.cells.forEach(cl => {
+    const col = {homes: '#b9c98f', grandpa: '#b9c98f', strip: '#c4cc9a', park: '#93bf6c', pondpark: '#93bf6c', riparian: '#8fbf7a', temple: '#a9d08a',
+      grove: '#7fa45a', farm: '#c9b277', plaza: '#cfc7b8', downtown: '#c9b8a6', heritage: '#c9b8a6', campus: '#cfc7b8', school: '#c9c08f', watsons: '#f2c6cf'}[cl.type];
+    if(col){ g.fillStyle = col; g.fillRect(cl.x0, cl.z0, cl.x1 - cl.x0, cl.z1 - cl.z0); }
+  });
+  // houses as tiny roofs
+  g.fillStyle = 'rgba(170,80,55,0.55)';
+  M.houses.forEach(h => g.fillRect(h.x0, h.z0, h.x1 - h.x0, h.z1 - h.z0));
+  M.ponds.forEach(p => { g.fillStyle = '#5aa8b0'; g.beginPath(); g.ellipse(p.x, p.z, p.rx, p.rz, 0, 0, Math.PI * 2); g.fill(); });
+  g.strokeStyle = '#4aa3a8'; g.lineWidth = 9 / Math.max(0.3, s * 3); g.lineCap = 'round'; g.lineJoin = 'round';
+  M.canals.forEach(cn => { g.beginPath(); cn.pts.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); g.lineWidth = 10; g.stroke(); });
+  g.strokeStyle = '#8a8a8a'; g.lineWidth = 6;
+  M.resRoads.forEach(rr => { g.fillStyle = '#9a958c'; g.fillRect(rr.x0, rr.z0, rr.x1 - rr.x0, rr.z1 - rr.z0); });
   M.lines.forEach(l => {
-    g.strokeStyle = l.kind === 'fwy' ? '#f2c531' : l.kind === 'art' ? '#3a3a3a' : '#555';
-    g.lineWidth = l.kind === 'fwy' ? 4 : l.kind === 'art' ? 3 : 1.5;
+    g.strokeStyle = l.kind === 'fwy' ? '#e8b93a' : l.kind === 'art' ? '#5b5650' : '#7d776e';
+    g.lineWidth = l.kind === 'fwy' ? 30 : l.kind === 'art' ? 20 : 12;
     g.beginPath();
-    if(l.axis === 'ns'){ g.moveTo(l.p * s, l.lo * s); g.lineTo(l.p * s, l.hi * s); } else { g.moveTo(l.lo * s, l.p * s); g.lineTo(l.hi * s, l.p * s); }
+    if(l.axis === 'ns'){ g.moveTo(l.p, l.lo); g.lineTo(l.p, l.hi); } else { g.moveTo(l.lo, l.p); g.lineTo(l.hi, l.p); }
     g.stroke();
   });
-  mapBase = {c, s};
-}
-function drawMinimap(r, big){
-  if(!mapBase) buildMapBase();
-  const S = G.S;
-  const [x, y, w, h] = r;
-  const s = Math.min(w / M.W, h / M.H), mw = M.W * s, mh = M.H * s, ox = x + (w - mw) / 2, oy = y + (h - mh) / 2;
-  panel(ox - 6, oy - 6, mw + 12, mh + 12, 0.7);
-  H.drawImage(mapBase.c, ox, oy, mw, mh);
-  const X = px => ox + px * s, Z = pz => oy + pz * s;
-  // shops
-  M.shops.forEach(sh => { H.fillStyle = '#f2a7b4'; H.beginPath(); H.arc(X(sh.x), Z(sh.z), big ? 9 : 6, 0, Math.PI * 2); H.fill(); H.strokeStyle = '#fff'; H.lineWidth = 2; H.stroke(); if(big) txt(sh.key === 'watsons' ? "Watson's" : "Grandpa's", X(sh.x) + 12, Z(sh.z), 13, '#fff'); });
-  // orders waiting for delivery
-  S.orders.forEach(o => { if(o.kind !== 'del' || o.state === 'done' || o.state === 'lost') return; const hs = M.houses[o.house]; H.fillStyle = o.state === 'van' ? '#ffffff' : 'rgba(255,255,255,0.45)'; H.fillRect(X(hs.x) - 2, Z(hs.z) - 2, 4, 4); });
-  S.goons.forEach(g => { if(g.st === 'gone') return; H.fillStyle = '#ff3a3a'; H.beginPath(); H.arc(X(g.x), Z(g.z), 3, 0, Math.PI * 2); H.fill(); });
-  S.pings.forEach(p => { H.strokeStyle = '#ff3a3a'; H.lineWidth = 2; H.beginPath(); H.arc(X(p.x), Z(p.z), 8 + 3 * Math.sin(wallT * 8), 0, Math.PI * 2); H.stroke(); });
-  S.vans.forEach(v => {
-    H.save(); H.translate(X(v.x), Z(v.z)); H.rotate(v.h);
-    H.fillStyle = v.color; H.strokeStyle = '#000'; H.lineWidth = 1.5;
-    H.beginPath(); H.moveTo(8, 0); H.lineTo(-6, 5); H.lineTo(-6, -5); H.closePath(); H.fill(); H.stroke();
-    H.restore();
-    const tp = SIM.targetPoint(S, v);
-    if(tp){ H.strokeStyle = v.color; H.lineWidth = 2; H.beginPath(); H.arc(X(tp.x), Z(tp.z), 5, 0, Math.PI * 2); H.stroke(); }
+  // street names along the arterials
+  g.fillStyle = 'rgba(255,255,255,0.9)'; g.textBaseline = 'middle';
+  const fs = Math.max(11, 13 / s) ;
+  g.font = 'bold ' + fs + 'px system-ui, sans-serif';
+  M.lines.filter(l => l.kind !== 'col').forEach(l => {
+    if(l.axis === 'ew'){ g.textAlign = 'left'; const n = M.lineName(l, 0); g.lineWidth = 4; g.strokeStyle = 'rgba(0,0,0,0.5)'; g.strokeText(n, M.bounds.x0 + 40, l.p - fs * 0.9); g.fillText(n, M.bounds.x0 + 40, l.p - fs * 0.9); }
+    else { [M.bounds.z0 + 30, (M.bounds.z0 + M.bounds.z1) / 2 + 200].forEach(z => { const n = M.lineName(l, z + 100); g.save(); g.translate(l.p + fs * 0.9, z); g.rotate(Math.PI / 2); g.textAlign = 'left'; g.strokeStyle = 'rgba(0,0,0,0.5)'; g.lineWidth = 4; g.strokeText(n, 0, 0); g.fillText(n, 0, 0); g.restore(); }); }
   });
-  if(big){
-    // the people in the shop
-    let yy = oy + mh + 14;
-    const ppl = present().filter(p => p.role && p.role !== 'drive');
-    if(ppl.length && yy < y + h){
-      txt(ppl.map(p => p.name + ' (' + ROLE_NAMES[p.role] + ')').join('  ·  ').slice(0, 120), ox, yy, 13, '#f7cfd6');
+  mapCache = {c, r: r.slice(), ms};
+}
+let labelBox = null;
+function mapLabel(text, x, y, color, size){
+  H.font = 'bold ' + (size || 13) + 'px system-ui, sans-serif';
+  const w = H.measureText(text).width + 12;
+  if(labelBox){ x = Math.max(labelBox[0] + w / 2 + 2, Math.min(labelBox[0] + labelBox[2] - w / 2 - 2, x)); y = Math.max(labelBox[1] + 12, Math.min(labelBox[1] + labelBox[3] - 12, y)); }
+  H.fillStyle = 'rgba(20,12,14,0.78)'; roundRect(H, x - w / 2, y - 10, w, 20, 8); H.fill();
+  H.fillStyle = color || '#fff'; H.textAlign = 'center'; H.textBaseline = 'middle'; H.fillText(text, x, y + 0.5);
+}
+function drawBoard(B, dt){
+  const S = G.S;
+  // the map
+  const r = B.map;
+  if(!mapCache || mapCache.r.join() !== r.join()) buildMap(r);
+  const ms = mapCache.ms;
+  panel(r[0] - 4, r[1] - 4, r[2] + 8, r[3] + 8, 0.9);
+  H.drawImage(mapCache.c, ms.x0, ms.y0, ms.w, ms.h);
+  const X = x => ms.ox + x * ms.s, Z = z => ms.oy + z * ms.s;
+  labelBox = [ms.x0, ms.y0, ms.w, ms.h];
+  H.save(); H.beginPath(); H.rect(ms.x0, ms.y0, ms.w, ms.h); H.clip();
+  // traffic, faintly
+  H.fillStyle = 'rgba(40,40,50,0.55)';
+  S.cars.forEach(c => H.fillRect(X(c.x) - 1.5, Z(c.z) - 1.5, 3, 3));
+  // landmarks
+  const lm = WGEO.lm;
+  [['temple', 'Mesa Temple'], ['neon', 'Neon Garden'], ['tower', 'Water Tower'], ['riparian', 'Riparian Preserve'], ['freestone', 'Freestone Park'], ['mcc', 'MCC']].forEach(([k, n]) => {
+    const p = lm[k]; if(p) { H.globalAlpha = 0.75; mapLabel(n, X(p.x), Z(p.z), '#f4ecd2', 11); H.globalAlpha = 1; }
+  });
+  // the orders: where every bouquet is wanted
+  S.orders.forEach(o => {
+    if(o.kind !== 'del' || o.state === 'done' || o.state === 'lost' || o.house < 0) return;
+    const h = M.houses[o.house], x = X(h.x), y = Z(h.z);
+    if(o.state === 'van'){
+      const v = S.vans[o.van];
+      H.fillStyle = '#fff'; H.beginPath(); H.arc(x, y, 6, 0, Math.PI * 2); H.fill();
+      H.strokeStyle = v ? v.color : '#fff'; H.lineWidth = 3; H.stroke();
+    } else {
+      H.fillStyle = o.state === 'ready' ? '#ff6fa6' : o.state === 'stolen' ? '#ff3a3a' : 'rgba(60,30,40,0.6)';
+      H.beginPath(); H.arc(x, y, o.state === 'ready' ? 5 : 3.5, 0, Math.PI * 2); H.fill();
+    }
+  });
+  // the shops
+  M.shops.forEach(sh => {
+    const x = X(sh.x), y = Z(sh.z);
+    H.fillStyle = '#f2a7b4'; H.beginPath(); H.arc(x, y, 11, 0, Math.PI * 2); H.fill(); H.strokeStyle = '#fff'; H.lineWidth = 3; H.stroke();
+    H.fillStyle = '#7a1f3a'; H.font = 'bold 12px Georgia'; H.textAlign = 'center'; H.textBaseline = 'middle'; H.fillText('W', x, y + 1);
+    mapLabel(sh.key === 'watsons' ? "Watson's - 2525 W Main" : "Grandpa's - 122 E Palo Verde", x, y + 22, '#f7cfd6', 12);
+  });
+  // goons
+  S.goons.forEach(g => {
+    if(g.st === 'gone') return;
+    const x = X(g.x), y = Z(g.z);
+    H.fillStyle = g.carry != null ? '#ff2a2a' : '#c43c3c'; H.beginPath(); H.arc(x, y, 5, 0, Math.PI * 2); H.fill();
+    H.fillStyle = '#fff'; H.font = 'bold 8px system-ui'; H.textAlign = 'center'; H.fillText('G', x, y + 0.5);
+  });
+  // dispatch pings
+  S.pings.forEach(p => { H.strokeStyle = '#ff3a3a'; H.lineWidth = 3; H.beginPath(); H.arc(X(p.x), Z(p.z), 12 + 4 * Math.sin(wallT * 8), 0, Math.PI * 2); H.stroke(); });
+  // the vans, their routes and where they are headed
+  S.vans.forEach((v, i) => {
+    const vx = v.rx != null ? v.rx : v.x, vz = v.rz != null ? v.rz : v.z;
+    const x = X(vx), y = Z(vz);
+    if(v.route && v.route.length > 1 && !v.crash){
+      H.strokeStyle = v.color; H.globalAlpha = 0.7; H.lineWidth = 3; H.setLineDash([6, 5]);
+      H.beginPath(); H.moveTo(x, y); for(let k = v.wp || 1; k < v.route.length; k++) H.lineTo(X(v.route[k].x), Z(v.route[k].z)); H.stroke();
+      H.setLineDash([]); H.globalAlpha = 1;
+    }
+    H.save(); H.translate(x, y); H.rotate(v.rh != null ? v.rh : v.h);
+    H.fillStyle = v.color; H.strokeStyle = '#fff'; H.lineWidth = 2;
+    roundRect(H, -9, -5.5, 18, 11, 3); H.fill(); H.stroke();
+    H.fillStyle = '#fff'; H.beginPath(); H.moveTo(9, 0); H.lineTo(4, -4); H.lineTo(4, 4); H.fill();
+    H.restore();
+    if(v.crash){ H.strokeStyle = '#ff3a3a'; H.lineWidth = 3; const q = 8 + 3 * Math.sin(wallT * 12); H.beginPath(); H.moveTo(x - q, y - q); H.lineTo(x + q, y + q); H.moveTo(x + q, y - q); H.lineTo(x - q, y + q); H.stroke(); }
+    mapLabel(v.name + (v.cargo.length ? '  ' + v.cargo.length + ' 💐' : ''), x, y - 18, v.color, 12);
+  });
+  // what just happened, where
+  for(let k = mapFx.length - 1; k >= 0; k--){
+    const f = mapFx[k]; f.t += dt;
+    if(f.t > 3){ mapFx.splice(k, 1); continue; }
+    const x = X(f.x), y = Z(f.z), u = f.t / 3;
+    H.globalAlpha = 1 - u;
+    if(f.k === 'crash'){
+      for(let j = 0; j < 14; j++){ const a = j / 14 * Math.PI * 2, rr = 8 + u * 40; H.fillStyle = ['#d81b3c', '#f6c21c', '#ef7fa6', '#ffffff'][j % 4]; H.beginPath(); H.arc(x + Math.cos(a) * rr, y + Math.sin(a) * rr, 3, 0, Math.PI * 2); H.fill(); }
+      outlined('CRASH!', x, y - 30 - u * 10, 16, '#ff5a5a');
+    } else if(f.k === 'paid') outlined('$' + f.pay, x, y - 12 - u * 30, 18, '#7dff6b');
+    else if(f.k === 'boom'){ H.strokeStyle = '#ff7a1a'; H.lineWidth = 5; H.beginPath(); H.arc(x, y, 10 + u * 60, 0, Math.PI * 2); H.stroke(); outlined('KABOOM!', x, y - 20, 18, '#ff7a1a'); }
+    H.globalAlpha = 1;
+  }
+  // the haboob rolls in from the southeast
+  if(S.dust > 0.02){
+    const gr = H.createLinearGradient(ms.x0 + ms.w, ms.y0 + ms.h, ms.x0, ms.y0);
+    gr.addColorStop(0, 'rgba(150,105,60,' + (0.6 * S.dust) + ')'); gr.addColorStop(Math.min(1, S.dust * 1.2), 'rgba(150,105,60,' + (0.35 * S.dust) + ')'); gr.addColorStop(1, 'rgba(150,105,60,0)');
+    H.fillStyle = gr; H.fillRect(ms.x0, ms.y0, ms.w, ms.h);
+  }
+  // the heat: a shimmer of orange at the top as it climbs
+  const heat = SIM.heat01(S);
+  if(heat > 0.5){ H.fillStyle = 'rgba(255,120,40,' + ((heat - 0.5) * 0.18) + ')'; H.fillRect(ms.x0, ms.y0, ms.w, ms.h); }
+  H.restore();
+  labelBox = null;
+  // the legend, above the map
+  const ly = Math.max(r[1] + 12, ms.y0 - 14);
+  txt('Mesa & Gilbert', ms.x0 + 4, ly, 14, '#f2c531');
+  txt('●  ready at the shop', ms.x0 + 140, ly, 12, '#ff6fa6');
+  txt('◉  in a van, on its way', ms.x0 + 290, ly, 12, '#fff');
+  txt('G  Gilbert Goon', ms.x0 + 460, ly, 12, '#ff8a8a');
+
+  // the action cam's frame and caption
+  const c = B.cam, fi = featured(), fv = S.vans[fi];
+  H.strokeStyle = fv ? fv.color : '#fff'; H.lineWidth = 3; H.strokeRect(c[0], c[1], c[2], c[3]);
+  if(NORENDER){ H.fillStyle = '#222'; H.fillRect(c[0], c[1], c[2], c[3]); }
+  if(fv){
+    panel(c[0] + 8, c[1] + 8, Math.min(c[2] - 16, 420), 30, 0.6);
+    txt('ACTION CAM  ·  ' + fv.name + '  ·  ' + Math.round(fv.spd * 2.237) + ' mph' + (fv.street ? '  ·  ' + fv.street : ''), c[0] + 18, c[1] + 23, 14, '#fff');
+    if(G.feat && G.feat.i === fi && G.feat.until > wallT){
+      const u = wallT - G.feat.t0;
+      outlined(G.feat.why, c[0] + c[2] / 2, c[1] + c[3] * 0.32, Math.min(46, c[2] / 14) * (u < 0.15 ? 1 + (0.15 - u) * 3 : 1), G.feat.color);
+    }
+  }
+
+  // the drivers
+  const cd = B.cards, n = S.vans.length, cols = n > 1 ? 2 : 1, rows = Math.ceil(n / cols);
+  const cw = (cd[2] - (cols - 1) * 8) / cols, chh = Math.min(92, (cd[3] - (rows - 1) * 6) / rows);
+  S.vans.forEach((v, i) => {
+    const x = cd[0] + (i % cols) * (cw + 8), y = cd[1] + Math.floor(i / cols) * (chh + 6);
+    panel(x, y, cw, chh, 0.78);
+    H.fillStyle = v.color; H.fillRect(x, y + 8, 5, chh - 16);
+    txt(v.name + (v.remote ? '' : v.owner === 'kbd' ? ' (keyboard)' : ' (computer)'), x + 14, y + 16, 15, '#fff');
+    txt(Math.round(v.spd * 2.237) + ' mph', x + cw - 10, y + 16, 15, v.boosting ? '#7fd0ff' : '#ddd', 'right');
+    // the bouquets aboard, drawn from the real flowers
+    const bw = Math.min(34, (cw - 20) / 6 - 2);
+    for(let k = 0; k < SIM.CAP; k++){
+      const bx = x + 12 + k * (bw + 3), by = y + 28;
+      H.fillStyle = 'rgba(255,255,255,0.07)'; H.fillRect(bx, by, bw, bw * 1.2);
+      const o = v.cargo[k] != null && SIM.orderById(S, v.cargo[k]);
+      if(o){
+        H.drawImage(bouquetPic(o.ri, 60), bx, by, bw, bw * 1.3);
+        H.fillStyle = o.fresh > 0.6 ? '#7dff6b' : o.fresh > 0.3 ? '#ffd23f' : '#ff6a3a';
+        H.fillRect(bx, by + bw * 1.2 + 1, bw * o.fresh, 3);
+      }
+    }
+    let status;
+    if(v.crash) status = ['CRASHED!', '#ff6a6a'];
+    else if(v.tgt){
+      const tp = SIM.targetPoint(S, v), d = tp ? Math.round(Math.hypot(tp.x - v.x, tp.z - v.z)) : 0;
+      status = v.tgt.k === 'house' ? ['→ ' + M.houses[v.tgt.id].addr + '  ' + d + ' m', '#f7cfd6'] : ['→ ' + M.shops[v.tgt.id].name + '  ' + d + ' m', '#ffe6a0'];
+    } else status = ['', '#fff'];
+    txt(status[0], x + 12, y + chh - 10, 12, status[1], 'left', '600');
+  });
+
+  // the shop
+  const sp = B.shop;
+  if(sp[3] > 60){
+    panel(sp[0], sp[1], sp[2], sp[3], 0.78);
+    txt("In the shop", sp[0] + 12, sp[1] + 16, 16, '#f2c531');
+    let wait = 0; S.orders.forEach(o => { if(o.state === 'new') wait++; });
+    txt(wait + ' waiting to be made  ·  ' + S.roses + ' roses sold from the cart', sp[0] + sp[2] - 12, sp[1] + 16, 12, '#ddd', 'right', '600');
+    const ready = S.orders.filter(o => o.state === 'ready'), bench = S.orders.filter(o => o.state === 'arr' && o.arr);
+    const ph = Math.max(40, Math.min(110, sp[3] - 56)), pw = ph / 1.3;
+    let x = sp[0] + 12;
+    if(bench.length){
+      txt('On the bench', sp[0] + 12, sp[1] + 36, 12, '#f7cfd6');
+      bench.slice(0, 3).forEach(o => {
+        H.drawImage(benchPic(o, 90), x, sp[1] + 44, pw, ph);
+        txt(nameOf(o.by), x + pw / 2, sp[1] + 44 + ph + 8, 11, '#fff', 'center', '600');
+        x += pw + 8;
+      });
+      x += 10;
+    }
+    txt('In the cooler' + (ready.length ? '' : ' - empty'), x, sp[1] + 36, 12, '#9fe8ff');
+    ready.slice(0, Math.floor((sp[0] + sp[2] - x) / (pw * 0.75))).forEach((o, k) => {
+      H.drawImage(bouquetPic(o.ri, 90), x + k * pw * 0.75, sp[1] + 44, pw, ph);
+    });
+    if(S.roles.grow > 0){
+      const gy = sp[1] + sp[3] - 12;
+      txt("Irene's garden", sp[0] + 12, gy, 11, '#b8ffb0');
+      S.garden.forEach((p, k) => { H.fillStyle = p.water < 0.25 ? '#c0703a' : p.grow >= 1 ? '#7dff6b' : '#4ab0ff'; H.beginPath(); H.arc(sp[0] + 110 + k * 14, gy, 5, 0, Math.PI * 2); H.fill(); });
     }
   }
 }
+
 function drawCenter(a, b){
   panel(VW / 2 - 260, VH / 2 - 70, 520, 140, 0.7);
   outlined(a, VW / 2, VH / 2 - 18, 44, '#fff');
@@ -1391,34 +1171,23 @@ function cue(k){
   if(k === 'end') [523, 659, 784, 1047, 784, 1047].forEach((f, i) => tone(f, 0.3, 'triangle', 0.14, i * 0.14));
   if(k === 'cheer') sfx('cheer');
 }
-/* engines: one hum per van, panned to its screen */
+/* the engine: one hum, for whichever van the action cam is on */
 function engineTick(){
   if(!AC) return;
-  const S = G.S, L = layout(S.vans.length);
-  S.vans.forEach((v, i) => {
-    let e = engines[i];
-    if(!e){
-      const o = AC.createOscillator(), o2 = AC.createOscillator(), f = AC.createBiquadFilter(), g = AC.createGain(), p = AC.createStereoPanner ? AC.createStereoPanner() : null;
-      o.type = 'sawtooth'; o2.type = 'square'; o2.detune.value = 7 + i * 3; f.type = 'lowpass'; f.frequency.value = 600; g.gain.value = 0;
-      o.connect(f); o2.connect(f); f.connect(g); if(p){ g.connect(p); p.connect(master); } else g.connect(master);
-      o.start(); o2.start();
-      const sq = AC.createBufferSource(); sq.buffer = noiseBuf; sq.loop = true;
-      const sf = AC.createBiquadFilter(); sf.type = 'bandpass'; sf.frequency.value = 1400; sf.Q.value = 6;
-      const sg = AC.createGain(); sg.gain.value = 0;
-      sq.connect(sf); sf.connect(sg); sg.connect(p || master); sq.start();
-      e = engines[i] = {o, o2, f, g, p, sg};
-    }
-    const on = (G.phase === 'day' || G.phase === 'count') && !v.crash;
-    const t = AC.currentTime;
-    const base = 38 + v.spd * 2.4 + (v.boosting ? 35 : 0);
-    e.o.frequency.setTargetAtTime(base, t, 0.05); e.o2.frequency.setTargetAtTime(base * 0.5, t, 0.05);
-    e.f.frequency.setTargetAtTime(400 + v.spd * 30 + (v.gas ? 500 : 0), t, 0.05);
-    e.g.gain.setTargetAtTime(on ? (0.035 + (v.gas ? 0.03 : 0) + (v.boosting ? 0.03 : 0)) / Math.sqrt(S.vans.length) : 0, t, 0.08);
-    e.sg.gain.setTargetAtTime(on && v.drift && v.spd > 12 ? 0.06 : 0, t, 0.05);
-    const r = L.views[i];
-    if(e.p && r) e.p.pan.setTargetAtTime(((r[0] + r[2] / 2) / VW - 0.5) * 1.4, t, 0.1);
-  });
-  for(let i = S.vans.length; i < engines.length; i++) if(engines[i]) engines[i].g.gain.setTargetAtTime(0, AC.currentTime, 0.1);
+  const S = G.S, v = S.vans[featured()];
+  let e = engines[0];
+  if(!e){
+    const o = AC.createOscillator(), o2 = AC.createOscillator(), f = AC.createBiquadFilter(), g = AC.createGain();
+    o.type = 'sawtooth'; o2.type = 'square'; o2.detune.value = 7; f.type = 'lowpass'; f.frequency.value = 600; g.gain.value = 0;
+    o.connect(f); o2.connect(f); f.connect(g); g.connect(master); o.start(); o2.start();
+    e = engines[0] = {o, o2, f, g};
+  }
+  const on = (G.phase === 'day' || G.phase === 'count') && v && !v.crash;
+  const t = AC.currentTime, spd = v ? v.spd : 0;
+  const base = 38 + spd * 2.4 + (v && v.boosting ? 35 : 0);
+  e.o.frequency.setTargetAtTime(base, t, 0.05); e.o2.frequency.setTargetAtTime(base * 0.5, t, 0.05);
+  e.f.frequency.setTargetAtTime(400 + spd * 30, t, 0.05);
+  e.g.gain.setTargetAtTime(on ? 0.04 + (v.boosting ? 0.03 : 0) : 0, t, 0.08);
 }
 
 /* music: a little sequenced loop - a walking bass, a brushed beat and a
@@ -1463,15 +1232,17 @@ function kick(t){ const o = AC.createOscillator(), g = AC.createGain(); o.freque
 function brush(t, vol){ const s = AC.createBufferSource(); s.buffer = noiseBuf; const f = AC.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 5000; const g = AC.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.08); s.connect(f); f.connect(g); g.connect(musicGain); s.start(t, Math.random()); s.stop(t + 0.1); }
 
 /* ---------------- go ---------------- */
+resize();
 openRoom();
 setInterval(tick, 1000 / 60);
 setInterval(broadcast, 100);
 setInterval(sweep, 1000);
+setInterval(worldTick, 50);
 setInterval(() => { engineTick(); musicTick(); }, 50);
 rebuildVans();
 requestAnimationFrame(frame);
 // for netcheck and the curious
-window.WTV = {G, NET, M, startDay, startParade, toLobby, scene, renderer};
+window.WTV = {G, NET, M, startDay, startParade, toLobby, scene, renderer, V};
 </script>
 </body>
 </html>

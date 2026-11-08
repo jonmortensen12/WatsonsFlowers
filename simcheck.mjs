@@ -90,6 +90,35 @@ function place(v, x, z, h, sp){ v.x = x; v.z = z; v.h = h; v.vx = Math.cos(h) * 
   ok(maxAir > 0.6 && !wet, 'a ramp at 67 mph jumps the canal: ' + maxAir.toFixed(2) + ' s of air');
 }
 
+/* a phone drives its own copy; the TV takes its word for where it is */
+{
+  const S = WSim.create(M, {seed: 11});
+  WSim.addVan(S, 'phone', 'Dad');
+  WSim.setOwner(S, 0, 'phone', 'Dad', true);
+  WSim.start(S);
+  for(let i = 0; i < 200; i++) WSim.step(S);
+  const o = S.orders.find(x => x.kind === 'del') || (() => { for(let i = 0; i < 2000; i++){ WSim.step(S); const q = S.orders.find(x => x.kind === 'del'); if(q) return q; } })();
+  const tv = S.vans[0];
+  o.state = 'van'; o.van = 0; tv.cargo.push(o.id);
+  const L = WSim.local(M);
+  const h = M.houses.find(q => q.side === 'n' && M.canalDist(q.x, q.z) > 40);
+  const v = WSim.localVan(L, h.x, h.z - 26, Math.PI / 2);
+  v.ghost = 0; v.vz = 30;
+  let crashEv = null;
+  for(let i = 0; i < 60 * 3 && !crashEv; i++){
+    v.gas = 1; WSim.localStep(L);
+    WSim.remoteState(S, 0, WSim.packVan(v)); WSim.step(S);
+    crashEv = L.ev.find(e => e.k === 'crash');
+  }
+  ok(crashEv && !crashEv.lost.length, "the phone's copy crashes into the house, and leaves the bouquets to the TV");
+  ok(Math.hypot(tv.x - v.x, tv.z - v.z) < 0.01, 'the TV van is where the phone says');
+  WSim.remoteEvent(S, 0, {k: 'crash', cause: crashEv.cause, imp: crashEv.imp});
+  WSim.step(S);
+  ok(tv.cargo.length === 0 && S.ev.some(e => e.k === 'crash' && e.lost.length === 1), 'the TV spills the cargo when the phone says it crashed');
+  for(let i = 0; i < 60 * 4; i++){ WSim.localStep(L); WSim.remoteState(S, 0, WSim.packVan(v)); if(L.ev.some(e => e.k === 'respawn')) WSim.remoteEvent(S, 0, {k: 'respawn'}); WSim.step(S); }
+  ok(!v.crash && !tv.crash, 'both come back on the road');
+}
+
 /* whole days with computer vans */
 function day(nVans, opts = {}){
   const S = WSim.create(M, {seed: opts.seed || 3, holiday: opts.holiday || 'thanksgiving', dayLen: opts.dayLen || WSim.DAY_LEN});

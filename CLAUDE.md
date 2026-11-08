@@ -26,6 +26,7 @@ node simcheck.mjs          # the simulation, headless: handling, crashes, canal 
 node netcheck.mjs          # the TV and six phones in Chromium over ?local=1, every job (several minutes)
 python3 tools/bake.py      # regenerate web/geo.js after re-fetching tools/osm/roads.json
 node tools/art.mjs         # redraw the icons and link preview
+python3 tools/flowers.py   # re-cut the flower photos into web/flowers/ (Pillow, numpy, scipy)
 ```
 
 `web/sim.js` decides everything that happens and draws nothing; `web/map.js`

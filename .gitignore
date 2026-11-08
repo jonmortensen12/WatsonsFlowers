@@ -2,3 +2,4 @@ node_modules/
 tools/samples/
 *.log
 netcheck-tv.png
+tools/flowers/src/

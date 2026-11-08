@@ -43,17 +43,31 @@
   .hols button.sel { background: var(--gold); color: #3a2a00; }
   /* driving */
   #drive { background: #1c1012; }
-  .dz { position: absolute; display: flex; align-items: center; justify-content: center; font-weight: 900; border-radius: 22px; font-size: 22px; letter-spacing: 1px; }
-  #bGas { right: 12px; bottom: 12px; width: 34%; height: 58%; background: #2e8b57; }
-  #bBrk { left: 12px; bottom: 12px; width: 26%; height: 58%; background: #a13a3a; }
-  #bBst { right: 12px; top: 12px; width: 34%; height: 30%; background: #2f6fb0; }
-  #bTos { left: 12px; top: 12px; width: 26%; height: 30%; background: #c4366e; }
-  #dmid { position: absolute; left: 28%; right: 36%; top: 0; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 6px; padding: 6px; }
-  #wheel { width: 120px; height: 120px; }
-  #dspd { font: 900 44px system-ui; line-height: 1; }
-  .bar { width: 100%; height: 10px; background: rgba(255,255,255,0.15); border-radius: 6px; overflow: hidden; }
+  #d3 { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .dz { position: absolute; display: flex; align-items: center; justify-content: center; font-weight: 900; border-radius: 20px; font-size: 18px; letter-spacing: 1px; border: 2px solid rgba(255,255,255,0.35); text-shadow: 0 1px 3px #000; }
+  #bGas { right: 10px; bottom: 10px; width: 20%; height: 52%; background: rgba(46,139,87,0.45); }
+  #bBrk { left: 10px; bottom: 10px; width: 20%; height: 52%; background: rgba(161,58,58,0.45); }
+  #bBst { right: 10px; top: 10px; width: 20%; height: 34%; background: rgba(47,111,176,0.45); }
+  #bTos { left: 10px; top: 10px; width: 20%; height: 34%; background: rgba(106,58,74,0.5); }
+  .dz.down { filter: brightness(1.8); }
+  #dmid { position: absolute; left: 22%; right: 22%; top: 0; bottom: 0; }
+  #dtop { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); max-width: 56%; display: flex; align-items: center; gap: 8px; background: rgba(20,10,14,0.65); padding: 5px 12px; border-radius: 14px; font-weight: 800; font-size: 14px; white-space: nowrap; pointer-events: none; }
+  #dtop canvas { width: 26px; height: 26px; flex: none; }
+  #dtgt { overflow: hidden; text-overflow: ellipsis; }
+  #ddist { color: #ccc; font-size: 12px; }
+  #dmsg { position: absolute; top: 26%; left: 22%; right: 22%; text-align: center; pointer-events: none; }
+  #dmsg div { font: 900 26px system-ui; text-shadow: 0 2px 6px #000, 0 0 2px #000; transition: opacity 0.4s; }
+  #dmsg div.big { font-size: 38px; }
+  #dbot { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 50%; display: flex; flex-direction: column; align-items: center; gap: 4px; pointer-events: none; }
+  #dspd { font: 900 30px system-ui; line-height: 1; text-shadow: 0 2px 4px #000; }
+  #dspd small { font-size: 13px; font-weight: 700; }
+  .bar { width: 100%; height: 9px; background: rgba(0,0,0,0.45); border-radius: 6px; overflow: hidden; }
   .bar > div { height: 100%; background: #7fd0ff; width: 0; }
-  #dtgt { font-size: 13px; color: var(--dim); max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #dcargo { display: flex; gap: 3px; min-height: 36px; }
+  #dcargo div { width: 26px; height: 36px; background: rgba(0,0,0,0.3); border-radius: 5px; position: relative; overflow: hidden; }
+  #dcargo img { width: 26px; height: 34px; }
+  #dcargo i { position: absolute; left: 0; bottom: 0; height: 3px; }
+  #wheel { position: absolute; left: 50%; bottom: 74px; width: 54px; height: 54px; transform: translateX(-50%); opacity: 0.8; pointer-events: none; }
   #rot { position: absolute; inset: 0; background: rgba(20,10,12,0.95); display: none; align-items: center; justify-content: center; flex-direction: column; text-align: center; z-index: 5; padding: 30px; font-size: 20px; }
   #calib { position: absolute; inset: 0; background: rgba(20,10,12,0.96); display: none; align-items: center; justify-content: center; flex-direction: column; text-align: center; gap: 14px; z-index: 6; padding: 20px; }
   .tiny { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; }
@@ -72,10 +86,14 @@
   .chip { display: inline-flex; align-items: center; gap: 4px; background: rgba(0,0,0,0.06); border-radius: 10px; padding: 2px 8px; font-size: 13px; font-weight: 700; }
   .sw { width: 14px; height: 14px; border-radius: 50%; display: inline-block; border: 1px solid rgba(0,0,0,0.3); }
   #bench { display: none; flex-direction: column; flex: 1; min-height: 0; }
-  #vase { width: 100%; height: 150px; display: block; }
+  #vase { width: 100%; height: 210px; display: block; }
+  .card .pic { position: absolute; right: 8px; top: 24px; width: 54px; height: 70px; }
+  .card { min-height: 92px; padding-right: 70px; }
+  #bench .card { padding-right: 96px; }
+  #bench .card .pic { width: 80px; height: 104px; top: 6px; }
   .stems { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
   .stem { padding: 8px 2px; font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 2px; background: #3a2226; }
-  .stem .sw { width: 28px; height: 28px; }
+  .stem img { width: 40px; height: 40px; object-fit: contain; }
   .stem.need { outline: 2px solid var(--gold); }
   .row2 { display: flex; gap: 6px; margin-top: 8px; }
   .row2 button { flex: 1; padding: 10px 4px; font-size: 13px; }
@@ -122,17 +140,16 @@
 
 <!-- driving -->
 <div class="scr" id="drive">
+  <canvas id="d3"></canvas>
+  <div id="dmid"></div>
+  <div id="dtop"><canvas id="darrow" width="52" height="52"></canvas><span id="dtgt">Getting the van ready...</span><span id="ddist"></span></div>
+  <div id="dmsg"></div>
+  <canvas id="wheel" width="240" height="240"></canvas>
+  <div id="dbot"><div id="dspd">0 <small>mph</small></div><div class="bar"><div id="dbst"></div></div><div id="dcargo"></div></div>
   <div class="dz" id="bTos">TOSS</div>
   <div class="dz" id="bBst">BOOST</div>
   <div class="dz" id="bBrk">BRAKE<br>drift</div>
   <div class="dz" id="bGas">GAS</div>
-  <div id="dmid">
-    <canvas id="wheel" width="240" height="240"></canvas>
-    <div id="dspd">0</div>
-    <div class="bar"><div id="dbst"></div></div>
-    <div id="dcargo" style="display:flex; gap:4px; min-height:18px"></div>
-    <div id="dtgt"></div>
-  </div>
   <div class="tiny"><button id="dJobs">Jobs</button><button id="dCal">Centre</button><button id="dAuto">Auto-gas: off</button></div>
   <div id="rot">Turn your phone sideways<br>and hold it like a steering wheel.</div>
   <div id="calib">
@@ -155,7 +172,7 @@
   <div class="scroll pad" id="aList"></div>
   <div id="bench" class="pad">
     <div class="card" id="aCard"></div>
-    <canvas id="vase" width="600" height="300"></canvas>
+    <canvas id="vase" width="600" height="420"></canvas>
     <div class="stems" id="aStems"></div>
     <div class="small" style="margin-top:6px">Wrap</div>
     <div class="row2" id="aWrap"></div>
@@ -202,6 +219,7 @@
 <script src="map.js"></script>
 <script src="sim.js"></script>
 <script src="net.js"></script>
+<script src="bouquet.js"></script>
 <script>
 'use strict';
 /* Watson's Flowers - the phone.
@@ -315,8 +333,10 @@ function onHost(d){
       break;
     case 'full': note('All six vans are taken - try tossing!'); setTimeout(() => note(''), 3000); break;
     case 's': SNAP = d; onSnap(); if(performance.now() - lastTx > 1000) tx({t: 'ping'}); break;
-    case 'v': VAN = d; onVan(); break;
-    case 'fx': onFx(d); break;
+    case 'v': VAN = d; onVan(); if(DRV) DRV.info(d); break;
+    case 'fx': if(DRV && ME.role === 'drive') DRV.fx(d); else onFx(d); break;
+    case 'drv': lastDrv = d; if(DRV) DRV.drv(d); break;
+    case 'w': if(DRV) DRV.world(d); break;
   }
 }
 
@@ -447,12 +467,61 @@ function release(){ IN.gas = IN.brk = IN.bst = 0; ['bGas', 'bBrk', 'bBst'].forEa
 let lastSent = 0, sent = '';
 function send(){
   if(ME.role !== 'drive') return;
-  const m = {t: 'in', st: Math.round(IN.st * 100) / 100, gas: (IN.gas || (autoGas && !IN.brk)) ? 1 : 0, brk: IN.brk, bst: IN.bst};
-  const k = JSON.stringify(m), now = performance.now();
-  if(k !== sent || now - lastSent > 100){ tx(m); sent = k; lastSent = now; }
+  // the van is on this phone: the controls go straight to it
+  if(DRV) DRV.input({st: IN.st, gas: (IN.gas || (autoGas && !IN.brk)) ? 1 : 0, brk: IN.brk, bst: IN.bst});
+}
+/* the 3D drive (drive.js), loaded the first time this phone drives */
+let DRV = null, lastDrv = null, drvLoading = false;
+const NORENDER = /(^|[?&])norender=1(&|$)/.test(location.search);
+const msgs = [];
+const HUD = {
+  flash(text, color, big){
+    const box = $('dmsg'), d = document.createElement('div');
+    d.textContent = text; d.style.color = color || '#fff'; if(big) d.className = 'big';
+    box.appendChild(d);
+    while(box.children.length > 3) box.removeChild(box.firstChild);
+    setTimeout(() => { d.style.opacity = 0; }, 1800); setTimeout(() => d.remove(), 2300);
+  },
+  update(v, info, cam, t){
+    if(!v) return;
+    $('dspd').innerHTML = Math.round(v.spd * 2.237) + ' <small>mph</small>';
+    $('dbst').style.width = Math.round((v.powder > 0 ? 1 : v.boost) * 100) + '%';
+    $('dbst').style.background = v.powder > 0 ? '#ff7a1a' : v.boost > 0.99 ? '#fff' : '#7fd0ff';
+    const g = $('darrow').getContext('2d');
+    g.clearRect(0, 0, 52, 52);
+    if(v.tgt && window.WSim){
+      const tp = info && info.tgt ? info.tgt : null;
+      $('dtgt').textContent = tp ? (tp.k === 'house' ? tp.name : tp.name + (tp.k === 'shop' ? ' - pick up' : '')) : '';
+      $('ddist').textContent = tp ? tp.d + ' m' : '';
+      if(info && info.toss && info.toss.ok){ $('dtgt').textContent = 'TOSS IT! ' + info.toss.addr; }
+      // point at it, relative to where the van faces
+      const ang = tgtAngle(v);
+      if(ang != null){ g.save(); g.translate(26, 26); g.rotate(ang); g.fillStyle = '#f2c531'; g.beginPath(); g.moveTo(0, -22); g.lineTo(16, 16); g.lineTo(0, 6); g.lineTo(-16, 16); g.closePath(); g.fill(); g.restore(); }
+    }
+  }
+};
+let townForArrow = null;
+function tgtAngle(v){
+  if(!v.tgt) return null;
+  if(!townForArrow) townForArrow = WMap.build(WGEO, 1927);
+  const p = v.tgt.k === 'house' ? townForArrow.houses[v.tgt.id].porch : townForArrow.shops[v.tgt.id];
+  if(!p) return null;
+  return Math.atan2(p.z - v.z, p.x - v.x) - v.h;
+}
+function loadDrive(){
+  if(DRV || drvLoading) return;
+  drvLoading = true;
+  WBouquet.load(() => {});
+  import('./drive.js').then(m => {
+    DRV = m.start({canvas: $('d3'), hud: HUD, send: tx, norender: NORENDER});
+    if(lastDrv) DRV.drv(lastDrv);
+    if(VAN) DRV.info(VAN);
+    drvLoading = false;
+  }).catch(e => { drvLoading = false; note('Could not start the 3D: ' + e.message); });
 }
 let driveLoop = null;
 function enterDrive(){
+  loadDrive();
   if(tilt.a0 == null && !tilt.touch) $('calib').style.display = 'flex';
   if(!driveLoop) driveLoop = setInterval(() => {
     IN.st = tiltSteer();
@@ -461,7 +530,11 @@ function enterDrive(){
     $('rot').style.display = innerHeight > innerWidth ? 'flex' : 'none';
   }, 1000 / 30);
 }
-function leaveDrive(){ if(driveLoop){ clearInterval(driveLoop); driveLoop = null; } IN.gas = IN.brk = IN.bst = 0; IN.st = 0; }
+function leaveDrive(){
+  if(driveLoop){ clearInterval(driveLoop); driveLoop = null; }
+  IN.gas = IN.brk = IN.bst = 0; IN.st = 0;
+  if(DRV && ME.role !== 'drive'){ DRV.stop(); DRV = null; }
+}
 function drawWheel(){
   const c = $('wheel'), g = c.getContext('2d');
   g.clearRect(0, 0, 240, 240);
@@ -473,15 +546,29 @@ function drawWheel(){
   g.fillStyle = '#fff'; g.fillRect(-4, -108, 8, 22);
   g.restore();
 }
+let cargoKey = '';
+WBouquet.load(() => { Object.keys(bqURL).forEach(k => delete bqURL[k]); cargoKey = ''; aKey = ''; benchBuilt = null; if(SNAP) onSnap(); });
+const bqURL = {};
+function bouquetURL(ri){
+  const hol = SNAP ? SNAP.hol : 'thanksgiving', k = hol + ri;
+  if(bqURL[k]) return bqURL[k];
+  const r = SIM.HOLIDAYS[hol].recipes[ri] || SIM.HOLIDAYS[hol].recipes[0];
+  return (bqURL[k] = WBouquet.canvas(WBouquet.fromRecipe(r, ri + 3), 60).toDataURL());
+}
 function onVan(){
   const v = VAN;
   if(cur === 'drive'){
-    $('dspd').textContent = v.spd;
-    $('dbst').style.width = v.bst + '%';
-    $('dbst').style.background = v.pw ? '#ff7a1a' : '#7fd0ff';
-    const cg = $('dcargo'); cg.innerHTML = '';
-    v.cargo.forEach(([ri, fr]) => { const s = document.createElement('span'); s.className = 'sw'; s.style.background = fr > 60 ? '#7dff6b' : fr > 30 ? '#ffd23f' : '#ff6a3a'; cg.appendChild(s); });
-    $('dtgt').textContent = v.cr ? 'CRASHED!' : v.tgt ? (v.tgt.k === 'house' ? 'To ' : '') + v.tgt.name + ' - ' + v.tgt.d + ' m' : '';
+    const key = JSON.stringify(v.cargo.map(c => [c[0], c[1] >> 4]));
+    if(key !== cargoKey){
+      cargoKey = key;
+      const cg = $('dcargo'); cg.innerHTML = '';
+      v.cargo.forEach(([ri, fr]) => {
+        const d = document.createElement('div'), im = document.createElement('img'), bar = document.createElement('i');
+        im.src = bouquetURL(ri); d.appendChild(im);
+        bar.style.width = fr + '%'; bar.style.background = fr > 60 ? '#7dff6b' : fr > 30 ? '#ffd23f' : '#ff6a3a'; d.appendChild(bar);
+        cg.appendChild(d);
+      });
+    }
     $('bTos').style.background = v.toss && v.toss.ok ? '#ff3f8a' : '#6a3a4a';
     $('bTos').textContent = v.toss && v.toss.ok ? 'TOSS!' : 'TOSS';
   }
@@ -590,7 +677,8 @@ function renderArrange(){
       const r = recipesFor(s.hol)[o[3]];
       const d = document.createElement('div');
       d.className = 'card' + (o[1] ? ' walk' : '') + (o[2] === 1 ? ' taken' : '');
-      d.innerHTML = '<b></b><div class="who"></div><div class="tl"></div><div class="chips"></div>';
+      d.innerHTML = '<b></b><div class="who"></div><div class="tl"></div><div class="chips"></div><img class="pic">';
+      d.querySelector('.pic').src = bouquetURL(o[3]);
       d.querySelector('b').textContent = (o[8] ? '★ ' : '') + r.name;
       d.querySelector('.who').textContent = (o[1] ? 'Walk-in: ' : 'For ') + o[10] + (o[2] === 1 ? ' - being made' : '');
       d.querySelector('.tl').textContent = o[9] + 's';
@@ -601,7 +689,7 @@ function renderArrange(){
     });
     // what is in the cooler
     const st = document.createElement('div'); st.className = 'chips'; st.style.marginTop = '10px';
-    F.forEach((f, i) => { const c = document.createElement('span'); c.className = 'chip'; c.style.background = 'rgba(255,255,255,0.1)'; c.style.color = '#fff'; c.innerHTML = '<span class="sw"></span>'; c.firstChild.style.background = f.c; c.append(' ' + s.stk[i]); st.appendChild(c); });
+    F.forEach((f, i) => { const c = document.createElement('span'); c.className = 'chip'; c.style.background = 'rgba(255,255,255,0.1)'; c.style.color = '#fff'; c.innerHTML = '<img src="flowers/' + f.k + '.png" style="width:20px;height:20px;object-fit:contain">'; c.append(' ' + s.stk[i]); st.appendChild(c); });
     box.appendChild(st);
     return;
   }
@@ -609,7 +697,7 @@ function renderArrange(){
   renderBench(mine);
 }
 function chips(el, r){
-  Object.keys(r.st).forEach(k => { const f = F.find(x => x.k === k); const c = document.createElement('span'); c.className = 'chip'; c.innerHTML = '<span class="sw"></span>'; c.firstChild.style.background = f.c; c.append(' ' + r.st[k] + ' ' + f.name.toLowerCase()); el.appendChild(c); });
+  Object.keys(r.st).forEach(k => { const f = F.find(x => x.k === k); const c = document.createElement('span'); c.className = 'chip'; c.innerHTML = '<img src="flowers/' + k + '.png" style="width:18px;height:18px;object-fit:contain">'; c.append(' ' + r.st[k] + ' ' + f.name.toLowerCase()); el.appendChild(c); });
   const w = SIM.WRAPS.find(x => x.k === r.wrap), rb = SIM.RIBBONS.find(x => x.k === r.rib);
   const c1 = document.createElement('span'); c1.className = 'chip'; c1.textContent = w.name + ' wrap'; el.appendChild(c1);
   const c2 = document.createElement('span'); c2.className = 'chip'; c2.textContent = rb.name + ' ribbon'; el.appendChild(c2);
@@ -621,15 +709,16 @@ function renderBench(o){
   const wrap = o[13], rib = o[14];
   if(benchBuilt !== o[0]){
     benchBuilt = o[0];
-    const card = $('aCard'); card.innerHTML = '<b></b><div class="who"></div><div class="chips"></div>';
+    const card = $('aCard'); card.innerHTML = '<b></b><div class="who"></div><div class="chips"></div><img class="pic">';
+    card.querySelector('.pic').src = bouquetURL(o[3]);
     card.querySelector('b').textContent = r.name;
     card.querySelector('.who').textContent = (o[1] ? 'Walk-in: ' : 'For ') + o[10];
     chips(card.querySelector('.chips'), r);
     $('aStems').innerHTML = '';
     F.forEach((f, i) => {
       const b = document.createElement('button'); b.className = 'stem'; b.dataset.i = i;
-      b.innerHTML = '<span class="sw"></span><span class="n"></span><span class="s small"></span>';
-      b.querySelector('.sw').style.background = f.c; b.querySelector('.n').textContent = f.name;
+      b.innerHTML = '<img><span class="n"></span><span class="s small"></span>';
+      b.querySelector('img').src = 'flowers/' + f.k + '.png'; b.querySelector('.n').textContent = f.name;
       b.onclick = () => { act({a: 'stem', o: o[0], f: i, d: 1}); buzz(8); };
       b.oncontextmenu = e => { e.preventDefault(); act({a: 'stem', o: o[0], f: i, d: -1}); };
       $('aStems').appendChild(b);
@@ -652,26 +741,17 @@ function renderBench(o){
   });
   [...$('aWrap').children].forEach(b => b.classList.toggle('sel', b.dataset.k === wrap));
   [...$('aRib').children].forEach(b => b.classList.toggle('sel', b.dataset.k === rib));
-  drawVase(have, wrap, rib);
+  drawVase(have, wrap, rib, o[0]);
 }
 let stemOrder = [];
 function lastStem(o){ const have = (o[12] || '').split(',').map(Number); for(let i = have.length - 1; i >= 0; i--) if(have[i] > 0) return i; return -1; }
-function drawVase(have, wrap, rib){
+function drawVase(have, wrap, rib, id){
   const c = $('vase'), g = c.getContext('2d');
-  g.clearRect(0, 0, 600, 300);
-  const wc = wrap ? SIM.WRAPS.find(w => w.k === wrap).c : 'rgba(255,255,255,0.15)';
-  g.fillStyle = wc; g.beginPath(); g.moveTo(230, 290); g.lineTo(140, 150); g.lineTo(460, 150); g.lineTo(370, 290); g.closePath(); g.fill();
-  let n = 0;
-  have.forEach((k, i) => { for(let j = 0; j < k; j++){
-    const a = (n * 2.39996) % (Math.PI * 2), rr = 18 + (n % 5) * 18;
-    const x = 300 + Math.cos(a) * rr * 1.6, y = 110 + Math.sin(a) * rr * 0.55 - (n % 3) * 6;
-    g.strokeStyle = '#3d6b26'; g.lineWidth = 4; g.beginPath(); g.moveTo(300, 260); g.lineTo(x, y); g.stroke();
-    g.fillStyle = F[i].c; g.beginPath(); g.arc(x, y, F[i].k === 'greens' ? 14 : 20, 0, Math.PI * 2); g.fill();
-    g.fillStyle = F[i].c2; g.beginPath(); g.arc(x, y, 7, 0, Math.PI * 2); g.fill();
-    n++;
-  } });
-  if(rib){ g.fillStyle = SIM.RIBBONS.find(w => w.k === rib).c; g.fillRect(250, 220, 100, 16); g.beginPath(); g.ellipse(280, 228, 26, 12, -0.5, 0, Math.PI * 2); g.ellipse(320, 228, 26, 12, 0.5, 0, Math.PI * 2); g.fill(); }
-  if(!n){ g.fillStyle = 'rgba(255,255,255,0.6)'; g.font = 'bold 24px system-ui'; g.textAlign = 'center'; g.fillText('Tap the flowers the card asks for', 300, 90); }
+  g.clearRect(0, 0, 600, 420);
+  const n = have.reduce((a, b) => a + (b || 0), 0);
+  // the bouquet as it is now, from the real flowers, in the middle of the bench
+  WBouquet.draw(g, 300 - 160, 4, 320, {st: have, wrap: wrap || null, rib: rib || null, seed: id});
+  if(!n){ g.fillStyle = 'rgba(255,255,255,0.75)'; g.font = 'bold 24px system-ui'; g.textAlign = 'center'; g.fillText('Tap the flowers the card asks for', 300, 150); }
 }
 
 /* ---------------- the garden ---------------- */

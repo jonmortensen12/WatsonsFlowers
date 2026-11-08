@@ -46,7 +46,7 @@ ok(/^[A-Z0-9]{4}$/.test(code), 'the TV opened room ' + code);
 async function phone(name, w, h){
   const p = await ctx.newPage(); watch(p, name);
   await p.setViewportSize({width: w || 390, height: h || 800});
-  await p.goto(base + 'controller.html?local=1#' + code);
+  await p.goto(base + 'controller.html?local=1&norender=1#' + code);
   await p.fill('#nameIn', name);
   await p.click('#joinBtn');
   await p.waitForFunction(sel => { const e = document.querySelector(sel); return e && e.getClientRects().length > 0; }, '#jobs.on', {polling: 250, timeout: 30000});
@@ -92,6 +92,7 @@ for(const [p, scr] of [[dad, 'drive'], [kid, 'toss'], [aunt, 'arrange'], [grandm
 }
 
 // Dad: finger steering, hold the gas
+await sleep(1500);
 if(await dad.locator('#calTouch').isVisible()) await dad.click('#calTouch');
 else await dad.evaluate(() => { tilt.touch = true; document.getElementById('calib').style.display = 'none'; });
 const gas = await dad.locator('#bGas').boundingBox();
@@ -146,6 +147,10 @@ await tv.evaluate(() => {
   o.state = 'van'; o.van = 0; o.q = 1; v.cargo.push(o.id);
   v.x = h.front.x; v.z = h.front.z; v.vx = v.vz = 0; v.h = 0; v.crash = null; v.ghost = 5;
   window.__toss = o.id;
+  return {x: h.front.x, z: h.front.z};
+}).then(async f => {
+  // Dad's phone owns where the van is: park it there too
+  await dad.evaluate(f => { const v = DRV.van; v.x = f.x; v.z = f.z; v.vx = v.vz = 0; v.h = 0; v.crash = null; v.ghost = 5; v.gas = v.bst = 0; v.brk = 1; }, f);
 });
 await sleep(400);
 const info = await kid.evaluate(() => VAN && VAN.toss);
