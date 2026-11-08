@@ -38,7 +38,7 @@ function watch(page, who){ page.on('pageerror', e => errors.push(who + ': ' + e.
 
 const tv = await ctx.newPage(); watch(tv, 'tv');
 await tv.setViewportSize({width: 480, height: 270});   // software rendering: a small TV keeps the phones responsive
-await tv.goto(base + 'index.html?local=1');
+await tv.goto(base + 'index.html?local=1&norender=1');
 await tv.waitForFunction(() => window.WTV && WTV.NET.code, null, {polling: 250, timeout: 30000});
 const code = await tv.evaluate(() => WTV.NET.code);
 ok(/^[A-Z0-9]{4}$/.test(code), 'the TV opened room ' + code);

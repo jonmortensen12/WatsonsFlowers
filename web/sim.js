@@ -576,7 +576,7 @@ function vanPhysics(S, v){
       v.stats.air += wasAir;
       emit(S, {k: 'land', v: v.i, air: wasAir, x: v.x, z: v.z});
       if(!S.best.air || wasAir > S.best.air.t) S.best.air = {t: wasAir, name: v.name, owner: v.owner};
-      var pa = person(S, v.owner); if(pa) pa.air += wasAir;
+      var pa = person(S, v.owner, v.owner ? v.name : null); if(pa) pa.air += wasAir;
     }
     v.air = 0;
     if(M.surf(v.x, v.z) === 3 && !v.ghostWater){ crash(S, v, 'canal', Math.hypot(v.vx, v.vz), 0, 0); return; }
@@ -681,7 +681,7 @@ function crash(S, v, cause, imp, nx, nz){
   S.crashes++; S.damage += cost;
   S.rep = Math.max(0, S.rep - 0.03 * lost.length);
   v.stats.crashes++;
-  var p = person(S, v.owner); if(p) p.crashes++;
+  var p = person(S, v.owner, v.owner ? v.name : null); if(p) p.crashes++;
   if(!S.best.crash || imp > S.best.crash.imp) S.best.crash = {imp: imp, name: v.name, owner: v.owner, cause: cause, lost: lost.length, street: v.street};
   emit(S, {k: 'crash', v: v.i, cause: cause, imp: imp, x: v.x, y: v.y, z: v.z, vx: vx, vz: vz, lost: lost, kaboom: v.powder > 0, cost: cost});
 }
@@ -1069,7 +1069,7 @@ function vanVsCars(S, v){
         c.nm |= bit;
         v.boost = Math.min(1, v.boost + 0.1);
         v.stats.near++;
-        var p = person(S, v.owner); if(p) p.near++;
+        var p = person(S, v.owner, v.owner ? v.name : null); if(p) p.near++;
         emit(S, {k: 'near', v: v.i, x: c.x, z: c.z, rel: rel});
       }
       continue;
@@ -1202,7 +1202,7 @@ function goonTick(S){
         g.spin = 0; g.wspin = 10 + v2.spd * 0.3;
         S.goonsHit++; S.money += 5;
         v2.boost = Math.min(1, v2.boost + 0.15); v2.stats.goons++;
-        var p = person(S, v2.owner); if(p) p.goons++;
+        var p = person(S, v2.owner, v2.owner ? v2.name : null); if(p) p.goons++;
         var rec = false;
         if(g.carry != null){
           var o3 = orderById(S, g.carry);
