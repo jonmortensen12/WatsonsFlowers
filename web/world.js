@@ -60,7 +60,13 @@ function boxesGeo(list, uvScale){
       }
       const W = f[5] * s, H = (fi === 2 || fi === 3) ? (z1 - z0) * s : b.h * s;
       uv[u++] = 0; uv[u++] = 0; uv[u++] = W; uv[u++] = 0; uv[u++] = W; uv[u++] = H; uv[u++] = 0; uv[u++] = H;
-      idx[k++] = base; idx[k++] = base + 1; idx[k++] = base + 2; idx[k++] = base; idx[k++] = base + 2; idx[k++] = base + 3;
+      // wind each face so it faces out (some were inside out, and those
+      // walls were culled - the "invisible walls")
+      const a0 = f[0], a1 = f[1], a2 = f[2];
+      const ux = a1[0] - a0[0], uy = a1[1] - a0[1], uz = a1[2] - a0[2], vx = a2[0] - a0[0], vy = a2[1] - a0[1], vz = a2[2] - a0[2];
+      const cxp = uy * vz - uz * vy, cyp = uz * vx - ux * vz, czp = ux * vy - uy * vx;
+      if(cxp * f[4][0] + cyp * f[4][1] + czp * f[4][2] >= 0){ idx[k++] = base; idx[k++] = base + 1; idx[k++] = base + 2; idx[k++] = base; idx[k++] = base + 2; idx[k++] = base + 3; }
+      else { idx[k++] = base; idx[k++] = base + 2; idx[k++] = base + 1; idx[k++] = base; idx[k++] = base + 3; idx[k++] = base + 2; }
     });
   });
   const g = new THREE.BufferGeometry();
@@ -286,10 +292,17 @@ export function buildWorld(scene, M, opts){
       new THREE.MeshLambertMaterial({map: t, alphaTest: 0.5}));
     ground.position.set(SX / 2, 0, SZ / 2);
     scene.add(ground);
-    // the desert beyond the map
-    const far = new THREE.Mesh(new THREE.PlaneGeometry(14000, 14000).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({color: '#c4a273'}));
-    far.position.set(SX / 2, -0.08, SZ / 2);
-    scene.add(far);
+    // the desert beyond the map: a frame round it, so nothing brown shows
+    // through the holes in the ground
+    const desert = new THREE.MeshLambertMaterial({color: '#c4a273'}), F = 7000;
+    [[-F / 2 + 0, SZ / 2, F, SZ + 2 * F], [SX + F / 2, SZ / 2, F, SZ + 2 * F], [SX / 2, -F / 2, SX, F], [SX / 2, SZ + F / 2, SX, F]].forEach(([x, z, w, d]) => {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d).rotateX(-Math.PI / 2), desert);
+      m.position.set(x, -0.08, z); scene.add(m);
+    });
+    // and under the whole map, water: every hole in the ground (a canal,
+    // a pond) shows blue
+    const under = new THREE.Mesh(new THREE.PlaneGeometry(SX, SZ).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({color: '#2f7fb8', emissive: '#0b2a40'}));
+    under.position.set(SX / 2, -1.7, SZ / 2); scene.add(under);
     W.groundTex = c;
   }
 
@@ -307,7 +320,7 @@ export function buildWorld(scene, M, opts){
   /* canals: concrete-lined channels with green-blue water */
   {
     const water = [], walls = [];
-    const wm = new THREE.MeshLambertMaterial({color: '#3d8f8a', emissive: '#0d2b2b'});
+    
     M.canals.forEach(cn => {
       const p = cn.pts;
       for(let k = 0; k < p.length - 1; k++){
@@ -346,13 +359,13 @@ export function buildWorld(scene, M, opts){
     const wg = new THREE.BufferGeometry();
     wg.setAttribute('position', new THREE.Float32BufferAttribute(wpos, 3));
     wg.setIndex(widx); wg.computeVertexNormals();
-    const wmesh = new THREE.Mesh(wg, new THREE.MeshLambertMaterial({color: '#3d8f8a', emissive: '#0d2b2b', side: THREE.DoubleSide}));
+    const wmesh = new THREE.Mesh(wg, new THREE.MeshLambertMaterial({color: '#3a8fc8', emissive: '#0c2c44', side: THREE.DoubleSide}));
     scene.add(wmesh);
     W.water = wmesh;
   }
   /* ponds */
   M.ponds.forEach(p => {
-    const m = new THREE.Mesh(new THREE.CircleGeometry(1, 40).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({color: '#4a9aa0', emissive: '#103538'}));
+    const m = new THREE.Mesh(new THREE.CircleGeometry(1, 40).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({color: '#3f95cc', emissive: '#0c2c44'}));
     m.scale.set(p.rx, 1, p.rz); m.position.set(p.x, p.shallow ? 0.05 : -0.6, p.z);
     scene.add(m);
   });
@@ -415,6 +428,20 @@ export function buildWorld(scene, M, opts){
     const mt = new THREE.Matrix4();
     M.walls.forEach((b, i) => { mt.makeScale(b.x1 - b.x0, b.h, b.z1 - b.z0).setPosition((b.x0 + b.x1) / 2, b.h / 2, (b.z0 + b.z1) / 2); im.setMatrixAt(i, mt); });
     scene.add(im);
+    // a wall a van went through: gone (the bricks are thrown by the view)
+    W.downWalls = new Set();
+    W.setWall = function(bi, up){
+      const b = M.boxes[bi]; if(!b || b.wi == null) return;
+      if(up){ mt.makeScale(b.x1 - b.x0, b.h, b.z1 - b.z0).setPosition((b.x0 + b.x1) / 2, b.h / 2, (b.z0 + b.z1) / 2); W.downWalls.delete(bi); }
+      else { mt.makeScale(0, 0, 0); W.downWalls.add(bi); }
+      im.setMatrixAt(b.wi, mt); im.instanceMatrix.needsUpdate = true;
+    };
+    W.syncWalls = function(down){
+      // down: an object or Set of box indices that are knocked over now
+      const want = down instanceof Set ? down : new Set(Object.keys(down || {}).map(Number));
+      W.downWalls.forEach(bi => { if(!want.has(bi)) W.setWall(bi, true); });
+      want.forEach(bi => { if(!W.downWalls.has(bi)) W.setWall(bi, false); });
+    };
   }
 
   /* freeway sound walls are walls too (in M.walls); concrete lots and buildings */
@@ -544,28 +571,67 @@ export function buildWorld(scene, M, opts){
     };
   }
 
-  /* ramps: dirt wedges */
+  /* ramps: striped boards with a JUMP! sign and flashing lights, so they
+     read from a long way off */
   {
-    const pos = [], idx = [];
+    const c = canvas(128, 256), g = c.getContext('2d');
+    for(let i = 0; i < 8; i++){ g.fillStyle = i % 2 ? '#1b1b1b' : '#f5c21b'; g.beginPath(); g.moveTo(0, i * 32 + 32); g.lineTo(64, i * 32); g.lineTo(128, i * 32 + 32); g.lineTo(128, i * 32 + 48); g.lineTo(64, i * 32 + 16); g.lineTo(0, i * 32 + 48); g.fill(); }
+    g.globalCompositeOperation = 'destination-over'; g.fillStyle = '#e8501b'; g.fillRect(0, 0, 128, 256);
+    const chev = tex(c);
+    const pos = [], uv = [], idx = [], side = [], sidx = [];
     M.ramps.forEach(r => {
-      const b = pos.length / 3;
-      // low end at s0, high end at s0 + len along (dx,dz)
-      let P;
+      let lo0, lo1, hi0, hi1;
       if(r.dz){
         const lo = r.s0, hi = r.s0 + r.dz * r.len;
-        P = [[r.x0, 0.02, lo], [r.x1, 0.02, lo], [r.x1, r.h, hi], [r.x0, r.h, hi], [r.x0, 0, hi], [r.x1, 0, hi]];
+        lo0 = [r.x0, 0.03, lo]; lo1 = [r.x1, 0.03, lo]; hi0 = [r.x0, r.h, hi]; hi1 = [r.x1, r.h, hi];
       } else {
         const lo = r.s0, hi = r.s0 + r.dx * r.len;
-        P = [[lo, 0.02, r.z0], [lo, 0.02, r.z1], [hi, r.h, r.z1], [hi, r.h, r.z0], [hi, 0, r.z0], [hi, 0, r.z1]];
+        lo0 = [lo, 0.03, r.z0]; lo1 = [lo, 0.03, r.z1]; hi0 = [hi, r.h, r.z0]; hi1 = [hi, r.h, r.z1];
       }
-      P.forEach(p => pos.push(...p));
-      idx.push(b, b + 1, b + 2, b, b + 2, b + 3, b + 3, b + 2, b + 5, b + 3, b + 5, b + 4, b, b + 3, b + 4, b + 1, b + 5, b + 2);
+      const b = pos.length / 3;
+      pos.push(...lo0, ...lo1, ...hi1, ...hi0);
+      uv.push(0, 0, 1, 0, 1, 1, 0, 1);
+      idx.push(b, b + 1, b + 2, b, b + 2, b + 3, b, b + 2, b + 1, b, b + 3, b + 2);
+      // the sides and the lip, orange
+      const s0 = side.length / 3;
+      const g0 = [hi0[0], 0, hi0[2]], g1 = [hi1[0], 0, hi1[2]];
+      side.push(...lo0, ...hi0, ...g0, ...lo1, ...hi1, ...g1, ...hi0, ...hi1, ...g1, ...g0);
+      sidx.push(s0, s0 + 1, s0 + 2, s0 + 3, s0 + 5, s0 + 4, s0 + 6, s0 + 7, s0 + 8, s0 + 6, s0 + 8, s0 + 9);
     });
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    g.setIndex(idx); g.computeVertexNormals();
-    scene.add(new THREE.Mesh(g, new THREE.MeshLambertMaterial({color: '#a0784b', side: THREE.DoubleSide, flatShading: true})));
-    // a striped marker board at each ramp
+    const g1 = new THREE.BufferGeometry();
+    g1.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g1.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g1.setIndex(idx); g1.computeVertexNormals();
+    scene.add(new THREE.Mesh(g1, new THREE.MeshLambertMaterial({map: chev, emissive: '#ffffff', emissiveMap: chev, emissiveIntensity: 0.25})));
+    const g2 = new THREE.BufferGeometry();
+    g2.setAttribute('position', new THREE.Float32BufferAttribute(side, 3));
+    g2.setIndex(sidx); g2.computeVertexNormals();
+    scene.add(new THREE.Mesh(g2, new THREE.MeshLambertMaterial({color: '#e8501b', side: THREE.DoubleSide})));
+    // the sign at the foot of each ramp, and two lights that blink
+    const signT = labelTex('JUMP!', {bg: '#f5c21b', color: '#1b1b1b', size: 92, font: 'Arial Black, sans-serif', w: 256, h: 128});
+    const signM = new THREE.MeshBasicMaterial({map: signT});
+    const postM = new THREE.MeshLambertMaterial({color: '#444'});
+    const lights = new THREE.InstancedMesh(new THREE.SphereGeometry(0.28, 8, 6), new THREE.MeshBasicMaterial({color: '#ff8a1a'}), M.ramps.length * 2);
+    const mt = new THREE.Matrix4();
+    M.ramps.forEach((r, i) => {
+      const along = r.dz ? [0, r.dz] : [r.dx, 0];
+      const cx = (r.x0 + r.x1) / 2, cz = (r.z0 + r.z1) / 2;
+      // to the outside of the ramp, a little before it
+      const px = r.dz ? cx + (r.x1 - r.x0) / 2 + 1.2 : r.s0 - along[0] * 3;
+      const pz = r.dz ? r.s0 - along[1] * 3 : cz + (r.z1 - r.z0) / 2 + 1.2;
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.15, 3.4, 0.15), postM); post.position.set(px, 1.7, pz); scene.add(post);
+      const sg = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.2), signM); sg.position.set(px, 3.6, pz);
+      sg.rotation.y = r.dz ? (r.dz > 0 ? Math.PI : 0) : (r.dx > 0 ? -Math.PI / 2 : Math.PI / 2);
+      scene.add(sg);
+      // the back of the board reads the right way round too
+      const sg2 = sg.clone(); sg2.rotation.y += Math.PI; scene.add(sg2);
+      const hx = r.dz ? cx : r.s0 + along[0] * r.len, hz = r.dz ? r.s0 + along[1] * r.len : cz;
+      const ox = r.dz ? (r.x1 - r.x0) / 2 : 0, oz = r.dz ? 0 : (r.z1 - r.z0) / 2;
+      mt.makeTranslation(hx - ox, r.h + 0.4, hz - oz); lights.setMatrixAt(i * 2, mt);
+      mt.makeTranslation(hx + ox, r.h + 0.4, hz + oz); lights.setMatrixAt(i * 2 + 1, mt);
+    });
+    scene.add(lights);
+    W.rampLights = lights;
   }
 
   /* traffic lights: a pole and a head per signalised corner */
@@ -823,6 +889,7 @@ export function buildWorld(scene, M, opts){
       else g.m.emissiveIntensity = g.base + (g.night - g.base) * night;
     });
     if(W.flag) W.flag.rotation.y = Math.sin(t * 2) * 0.25;
+    if(W.rampLights) W.rampLights.material.color.set(Math.floor(t * 3) % 2 ? '#ff8a1a' : '#5a2a00');
   };
   W.updateLights = function(S){
     if(!S) return;

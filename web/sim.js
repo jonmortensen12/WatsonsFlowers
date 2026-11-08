@@ -16,8 +16,8 @@
 var DT = 1 / 60;
 var DAY_LEN = 420;                 // seconds, 8:00 to 20:00
 var CAP = 6;                       // bouquets a van carries
-var CRASH_V = 16;                  // m/s into something solid
-var CRASH_CAR = 13;                // m/s closing on a car
+var CRASH_V = 24;                  // m/s into something solid (less than this dents the van)
+var CRASH_CAR = 20;                // m/s closing on a car
 var G = 22;                        // gravity, a little arcade-heavy
 var MAX_VANS = 6;
 
@@ -83,7 +83,7 @@ function create(M, opts){
     holiday: HOLIDAYS[opts.holiday] ? opts.holiday : 'thanksgiving',
     dayLen: opts.dayLen || DAY_LEN,
     ph: 'lobby', t: 0, dt: 0, clock: 8, count: 0, paused: false,
-    vans: [], cars: [], goons: [], orders: [], shots: [], pings: [], wreckId: 0,
+    vans: [], cars: [], goons: [], orders: [], shots: [], pings: [], wreckId: 0, wallsDown: {}, gardenN: 12,
     stock: FLOWERS.map(function(){ return 16; }),
     garden: [], broken: {}, pickupT: {}, boomUsed: false,
     money: 0, rep: 3, delivered: 0, perfect: 0, crashes: 0, roses: 0, cheers: 0,
@@ -94,8 +94,7 @@ function create(M, opts){
     compArrT: 4, wholesaleT: 0, orderT: 2, walkT: 0, spawnCarT: 0,
     parade: null, results: null, best: {crash: null, air: null, drift: null}
   };
-  var plots = ['rose', 'rose', 'sunflower', 'sunflower', 'mum', 'mum', 'lily', 'carnation', 'daisy', 'daisy', 'greens', 'greens'];
-  S.garden = plots.map(function(k, i){ return {i: i, f: FI[k], water: 0.7, grow: 0.3 + (i % 3) * 0.2}; });
+  setGarden(S, 12);
   M.lights.forEach(function(L, i){ L.off = ((i * 7919) % 16); });
   return S;
 }
@@ -125,7 +124,7 @@ function addVan(S, owner, name){
     air: 0, ghost: 1.5, crash: null, cargo: [], tgt: null, route: null, wp: 0, routeT: 0,
     prio: null, ai: {stuck: 0, rev: 0, tossT: 0, patience: 0, hold: 0}, spd: 0, street: '', nmT: 0,
     stats: {del: 0, perfect: 0, crashes: 0, near: 0, air: 0, top: 0, drift: 0, goons: 0, dist: 0, money: 0, boosts: 0},
-    msg: null, lastToss: 0, mist: 0};
+    msg: null, lastToss: 0, mist: 0, dmg: 0};
   S.vans.push(v);
   return i;
 }
@@ -262,7 +261,14 @@ function quality(S, o){
   if(a.wrap !== r.wrap) q -= 0.12;
   if(a.rib !== r.rib) q -= 0.12;
   var t = S.t - a.t0;
-  if(t < 12) q += 0.12; else if(t < 20) q += 0.05;
+  if(t < 20) q += 0.1; else if(t < 35) q += 0.05;
+  // arranged by hand, and arranged well: balanced, and not all in a heap
+  var placed = (a.pos || []).filter(function(q2){ return q2[1] !== null; });
+  if(placed.length >= 3){
+    var mx = 0; placed.forEach(function(q2){ mx += q2[1]; }); mx /= placed.length;
+    var sx = 0; placed.forEach(function(q2){ sx += (q2[1] - mx) * (q2[1] - mx); }); sx = Math.sqrt(sx / placed.length);
+    if(Math.abs(mx - 0.5) < 0.12 && sx > 0.07) q += 0.06;
+  }
   return Math.max(0.3, Math.min(1.2, q));
 }
 function finish(S, o, q, who){
@@ -300,6 +306,17 @@ function computerArranger(S){
 }
 
 /* ---------------- the garden and the wholesaler ---------------- */
+/* 12 plots fits one screen; 24 and 36 make a field to walk around */
+var PLOT_ORDER = ['rose', 'sunflower', 'mum', 'lily', 'carnation', 'daisy', 'greens', 'rose', 'sunflower', 'daisy', 'mum', 'greens'];
+function setGarden(S, n){
+  n = n === 36 ? 36 : n === 24 ? 24 : 12;
+  var old = S.garden || [];
+  S.garden = [];
+  for(var i = 0; i < n; i++){
+    S.garden.push(old[i] || {i: i, f: FI[PLOT_ORDER[(i * 5 + Math.floor(i / 6)) % PLOT_ORDER.length]], water: 0.7, grow: 0.3 + (i % 3) * 0.2});
+  }
+  S.gardenN = n;
+}
 function gardenTick(S){
   var hot = heat01(S);
   if(S.roles.grow > 0){
@@ -331,7 +348,7 @@ function act(S, who, name, a){
       if(!o || o.state !== 'new') return;
       // one at a time
       S.orders.forEach(function(x){ if(x.state === 'arr' && x.by === who){ refundArr(S, x); x.state = 'new'; x.by = null; } });
-      o.state = 'arr'; o.by = who; o.arr = {st: FLOWERS.map(function(){ return 0; }), wrap: null, rib: null, t0: S.t};
+      o.state = 'arr'; o.by = who; o.arr = {st: FLOWERS.map(function(){ return 0; }), pos: [], wrap: null, rib: null, t0: S.t};
       emit(S, {k: 'claim', id: o.id, who: who});
       break;
     case 'stem':
@@ -339,11 +356,27 @@ function act(S, who, name, a){
       if(!o || o.state !== 'arr' || o.by !== who) return;
       var i = +a.f;
       if(!(i >= 0 && i < FLOWERS.length)) return;
+      var pos = o.arr.pos || (o.arr.pos = []);
       if(a.d > 0){
         if(S.stock[i] <= 0){ emit(S, {k: 'out', f: i, who: who}); return; }
         if(o.arr.st[i] >= 12) return;
         S.stock[i]--; o.arr.st[i]++;
-      } else if(o.arr.st[i] > 0){ S.stock[i]++; o.arr.st[i]--; }
+        // where it was put, if it was put somewhere (null: wherever looks right)
+        var px = isFinite(a.x) && a.x !== null ? Math.max(0, Math.min(1, +a.x)) : null;
+        pos.push([i, px, px === null ? null : Math.max(0, Math.min(1.3, +a.y || 0)), Math.max(-3, Math.min(3, +a.r || 0))]);
+      } else if(o.arr.st[i] > 0){
+        S.stock[i]++; o.arr.st[i]--;
+        var at = (a.idx | 0) >= 0 && pos[a.idx | 0] && pos[a.idx | 0][0] === i ? a.idx | 0 : -1;
+        if(at < 0) for(var q = pos.length - 1; q >= 0; q--) if(pos[q][0] === i){ at = q; break; }
+        if(at >= 0) pos.splice(at, 1);
+      }
+      break;
+    case 'move':
+      o = orderById(S, a.o);
+      if(!o || o.state !== 'arr' || o.by !== who || !o.arr.pos) return;
+      var mv = o.arr.pos[a.idx | 0]; if(!mv) return;
+      mv[1] = Math.max(0, Math.min(1, +a.x || 0)); mv[2] = Math.max(0, Math.min(1.3, +a.y || 0));
+      if(isFinite(a.r)) mv[3] = Math.max(-3, Math.min(3, +a.r));
       break;
     case 'wrap':
       o = orderById(S, a.o);
@@ -358,12 +391,19 @@ function act(S, who, name, a){
       if(!o || o.state !== 'arr' || o.by !== who) return;
       var tot = o.arr.st.reduce(function(s, n){ return s + n; }, 0);
       if(tot < 1) return;
+      o.made = {wrap: o.arr.wrap, rib: o.arr.rib};
+      // the bouquet keeps the layout it was made with
+      o.pos = (o.arr.pos || []).filter(function(q){ return q[1] !== null; }).length ? o.arr.pos.map(function(q){ return q.slice(); }) : null;
       finish(S, o, quality(S, o), who);
       break;
     case 'drop':
       o = orderById(S, a.o);
       if(!o || o.state !== 'arr' || o.by !== who) return;
       refundArr(S, o); o.state = 'new'; o.by = null;
+      break;
+    case 'gsize':
+      setGarden(S, a.n | 0);
+      emit(S, {k: 'gsize', n: S.gardenN, who: who});
       break;
     case 'water':
       if(!day) return;
@@ -511,7 +551,7 @@ function vanPhysics(S, v){
   v.boosting = false;
   if(grounded){
     var wantBoost = v.bst && (v.boost > 0.03 || v.powder > 0);
-    var maxV = (v.powder > 0 ? 74 : wantBoost ? 64 : 46) * SURF_MAX[sf];
+    var maxV = (v.powder > 0 ? 74 : wantBoost ? 64 : 46) * SURF_MAX[sf] * (1 - 0.15 * (v.dmg || 0));
     var a = 0;
     if(v.gas || wantBoost){
       if(vf < 0) a = 30;
@@ -603,8 +643,10 @@ function collideStatic(S, v, ox, oz){
     var cx = v.x + fx * 1.35 * c, cz = v.z + fz * 1.35 * c, r = 1.15;
     var k, b, px, pz, dx, dz, d2, d, pen, nx, nz;
     for(k = 0; k < near.b.length; k++){
-      b = M.boxes[near.b[k]];
+      var bi = near.b[k];
+      b = M.boxes[bi];
       if(v.y > b.h - 0.15) continue;
+      if(b.k === 'wall' && S.wallsDown[bi]) continue;
       px = cx < b.x0 ? b.x0 : cx > b.x1 ? b.x1 : cx;
       pz = cz < b.z0 ? b.z0 : cz > b.z1 ? b.z1 : cz;
       dx = cx - px; dz = cz - pz; d2 = dx * dx + dz * dz;
@@ -615,8 +657,17 @@ function collideStatic(S, v, ox, oz){
         nx = m === l ? -1 : m === rr ? 1 : 0; nz = m === t ? -1 : m === bb ? 1 : 0;
         pen = m + r;
       } else { d = Math.sqrt(d2); nx = dx / d; nz = dz / d; pen = r - d; }
-      v.x += nx * pen; v.z += nz * pen; cx += nx * pen; cz += nz * pen;
       var vn = v.vx * nx + v.vz * nz;
+      // a low block wall goes over: bricks everywhere, the van slows, a dent
+      if(b.k === 'wall' && v.spd > 5 && vn < -1.5){
+        S.wallsDown[bi] = S.t + 120;
+        var slow = Math.max(0.55, 0.85 - Math.min(0.3, -vn * 0.012));
+        v.vx *= slow; v.vz *= slow;
+        dent(S, v, 0.02 + -vn * 0.004);
+        emit(S, {k: 'wall', b: bi, v: v.i, x: (b.x0 + b.x1) / 2, z: (b.z0 + b.z1) / 2, vx: v.vx, vz: v.vz});
+        continue;
+      }
+      v.x += nx * pen; v.z += nz * pen; cx += nx * pen; cz += nz * pen;
       if(vn < 0 && (!worst || -vn > worst.imp)) worst = {imp: -vn, nx: nx, nz: nz, k: b.k};
     }
     for(k = 0; k < near.c.length; k++){
@@ -644,11 +695,23 @@ function collideStatic(S, v, ox, oz){
   }
   if(!worst) return;
   if(worst.imp > CRASH_V && v.ghost <= 0){ crash(S, v, worst.k, worst.imp, worst.nx, worst.nz); return; }
+  // under that, it dents; dent it enough and it is a wreck anyway
+  if(worst.imp > 4 && v.ghost <= 0){
+    dent(S, v, worst.imp * 0.009);
+    if(v.dmg >= 1){ crash(S, v, 'wrecked', Math.max(worst.imp, 20), worst.nx, worst.nz); return; }
+  }
   // a glancing blow: bounce off, keep going along the wall
   // take away the speed into the wall (and a little more, a bounce), scrape along it
   v.vx += worst.nx * worst.imp * 1.15; v.vz += worst.nz * worst.imp * 1.15;
   v.vx *= 0.97; v.vz *= 0.97;
   if(worst.imp > 5) emit(S, {k: 'bump', v: v.i, imp: worst.imp, x: v.x, z: v.z});
+}
+
+/* ---------------- damage ---------------- */
+function dent(S, v, amt){
+  var before = v.dmg || 0;
+  v.dmg = Math.min(1, before + amt);
+  if(Math.floor(before * 4) !== Math.floor(v.dmg * 4)) emit(S, {k: 'dent', v: v.i, dmg: v.dmg, x: v.x, z: v.z});
 }
 
 /* ---------------- crashes ---------------- */
@@ -738,6 +801,7 @@ function respawn(S, v){
   if(tgt){ var want = Math.atan2(tgt.z - spot.z, tgt.x - spot.x); if(Math.abs(wrapA(want - h)) > Math.PI / 2) h += Math.PI; }
   v.x = spot.x; v.z = spot.z; v.y = 0; v.vy = 0; v.h = h; v.vx = v.vz = 0; v.yaw = 0;
   v.crash = null; v.ghost = 2.2; v.air = 0; v.powder = 0; v.routeT = 0; v.drift = 0;
+  if((v.dmg || 0) > 0.3) v.dmg = 0.3;
   emit(S, {k: 'respawn', v: v.i});
 }
 
@@ -997,12 +1061,16 @@ function trafficTick(S){
     if(c.wreck){
       var w = c.wreck;
       w.t += DT; w.vy -= G * DT; w.y += w.vy * DT;
-      if(w.y < 0){ w.y = 0; w.vy = w.vy < -3 ? -w.vy * 0.3 : 0; }
+      if(w.y < 0){
+        w.y = 0;
+        if(w.vy < -3){ w.vy = -w.vy * 0.45; emit(S, {k: 'carbounce', x: c.x, z: c.z}); } else w.vy = 0;
+      }
       var sp = Math.hypot(w.vx, w.vz);
-      if(sp > 0 && w.y <= 0.01){ var f = Math.max(0, sp - 9 * DT) / sp; w.vx *= f; w.vz *= f; }
+      if(sp > 0 && w.y <= 0.01){ var f = Math.max(0, sp - 6 * DT) / sp; w.vx *= f; w.vz *= f; }
       c.x += w.vx * DT; c.z += w.vz * DT;
       w.ax += w.wx * DT; w.ay += w.wy * DT; w.az += w.wz * DT;
-      if(w.y <= 0.01){ w.wx *= 0.93; w.wz *= 0.93; w.wy *= 0.95; }
+      // on the ground it keeps rolling while it is still moving, then settles
+      if(w.y <= 0.01){ var roll = sp > 3 ? 0.992 : 0.9; w.wx *= roll; w.wz *= roll; w.wy *= 0.95; }
       if(w.t > 14) S.cars.splice(i, 1);
       continue;
     }
@@ -1094,16 +1162,21 @@ function vanVsCars(S, v){
     }
     if(relN < 0){ v.vx -= hit.nx * relN * 1.2; v.vz -= hit.nz * relN * 1.2; }
     if(-relN > 4) emit(S, {k: 'bump', v: v.i, imp: -relN, x: v.x, z: v.z});
-    if(-relN > 6 && !c.wreck) wreckCar(S, c, v, -relN * 0.5);
+    if(-relN > 4 && v.ghost <= 0){ dent(S, v, -relN * 0.012); if(v.dmg >= 1){ S.hitCar = c.id; crash(S, v, 'wrecked', 22, hit.nx, hit.nz); return; } }
+    // a hard shove sends the car flying even when the van keeps going
+    if(-relN > 6 && !c.wreck){ wreckCar(S, c, v, -relN * 0.8); S.hitCar = null; }
   }
 }
 function wreckCar(S, c, v, imp){
   if(c.wreck) return;
   var R = S.R;
   var cx = Math.cos(c.h), cz = Math.sin(c.h);
-  c.wreck = {t: 0, y: 0, vy: 2 + imp * 0.18, vx: cx * c.v * 0.5 + v.vx * 0.6, vz: cz * c.v * 0.5 + v.vz * 0.6,
-    ax: 0, ay: 0, az: 0, wx: (R() - 0.5) * imp * 0.4, wy: (R() - 0.5) * imp * 0.3, wz: (R() - 0.5) * imp * 0.4};
-  emit(S, {k: 'carhit', id: c.id, x: c.x, z: c.z, imp: imp});
+  // up, over and rolling: a hard hit throws the car end over end
+  var big = Math.min(1, imp / 35);
+  c.wreck = {t: 0, y: 0.2, vy: Math.min(20, 4 + imp * 0.42), vx: cx * c.v * 0.4 + v.vx * 0.95, vz: cz * c.v * 0.4 + v.vz * 0.95,
+    ax: 0, ay: 0, az: 0, wx: (R() < 0.5 ? -1 : 1) * (3 + imp * 0.35 * (0.6 + R() * 0.6)), wy: (R() - 0.5) * imp * 0.25,
+    wz: (R() < 0.5 ? -1 : 1) * (2 + imp * 0.3 * R()), boom: imp > 30 && R() < 0.45};
+  emit(S, {k: 'carhit', id: c.id, x: c.x, z: c.z, imp: imp, vx: c.wreck.vx, vz: c.wreck.vz, boom: c.wreck.boom, big: big});
 }
 
 function vanVsVans(S){
@@ -1359,6 +1432,7 @@ function step(S){
   goonTick(S);
   shotsTick(S);
   for(var k in S.broken) if(S.broken[k] < S.t){ delete S.broken[k]; }
+  for(var w in S.wallsDown) if(S.wallsDown[w] < S.t){ delete S.wallsDown[w]; }
   S.pings.forEach(function(p){ p.t -= DT; });
   S.pings = S.pings.filter(function(p){ return p.t > 0; });
   if(S.t >= S.dayLen) endDay(S);
@@ -1371,7 +1445,7 @@ function remoteState(S, i, a){
   var v = S.vans[i]; if(!v || !v.remote || !a) return;
   var ox = v.x, oz = v.z;
   v.x = +a[0]; v.z = +a[1]; v.y = +a[2]; v.h = +a[3]; v.vx = +a[4]; v.vz = +a[5]; v.vy = +a[6]; v.yaw = +a[7];
-  v.boost = +a[8]; var f = a[9] | 0;
+  v.boost = +a[8]; var f = a[9] | 0; v.dmg = +a[10] || 0;
   v.boosting = !!(f & 1); v.drift = (f & 2) ? 1 : 0; v.air = (f & 4) ? 0.5 : 0; v.ghost = (f & 8) ? 0.5 : 0;
   v.powder = (f & 32) ? Math.max(v.powder, 0.1) : v.powder;
   v.spd = Math.hypot(v.vx, v.vz);
@@ -1381,7 +1455,7 @@ function remoteState(S, i, a){
   if(f & 16){
     if(!v.crash) v.crash = {remote: true, t: 0, cause: 'crash', imp: 0, lost: 0, h: v.h};
     v.crash.x = v.x; v.crash.z = v.z; v.crash.y = v.y;
-    v.crash.ax = +a[10] || 0; v.crash.ay = +a[11] || 0; v.crash.az = +a[12] || 0; v.crash.h = +a[13] || v.h;
+    v.crash.ax = +a[11] || 0; v.crash.ay = +a[12] || 0; v.crash.az = +a[13] || 0; v.crash.h = +a[14] || v.h;
   } else if(v.crash && v.crash.remote) v.crash = null;
 }
 function remoteEvent(S, i, e){
@@ -1410,6 +1484,11 @@ function remoteEvent(S, i, e){
       var pa = person(S, v.owner, v.name); if(pa) pa.air += air;
       emit(S, {k: 'land', v: v.i, air: air, x: v.x, z: v.z});
       break;
+    case 'wall':
+      var wb = S.M.boxes[e.b | 0]; if(!wb || wb.k !== 'wall' || S.wallsDown[e.b | 0]) return;
+      S.wallsDown[e.b | 0] = S.t + 120;
+      emit(S, {k: 'wall', b: e.b | 0, v: v.i, x: (wb.x0 + wb.x1) / 2, z: (wb.z0 + wb.z1) / 2, vx: v.vx, vz: v.vz});
+      break;
     case 'respawn':
       v.crash = null; v.routeT = 0;
       emit(S, {k: 'respawn', v: v.i});
@@ -1419,14 +1498,14 @@ function remoteEvent(S, i, e){
 
 /* A phone's own copy: the town, its van and the traffic it is told about. */
 function local(M, v){
-  var L = {M: M, local: true, R: root.WMap.rng(7), t: 0, q: [], ev: [], cars: [], broken: {}, dust: 0, gust: {x: 0, z: 0, t: 0},
+  var L = {M: M, local: true, R: root.WMap.rng(7), t: 0, q: [], ev: [], cars: [], broken: {}, wallsDown: {}, dust: 0, gust: {x: 0, z: 0, t: 0},
     vans: [], best: {}, ppl: {}, orders: [], hitCar: null};
   return L;
 }
 function localVan(L, x, z, h){
   var v = {i: 0, owner: 'me', name: 'me', x: x, z: z, y: 0, vy: 0, h: h || 0, vx: 0, vz: 0, yaw: 0, g: 0,
     st: 0, gas: 0, brk: 0, bst: 0, boost: 0.35, boosting: false, drift: 0, driftT: 0, powder: 0,
-    air: 0, ghost: 1.5, crash: null, cargo: [], tgt: null, spd: 0, street: '',
+    air: 0, ghost: 1.5, crash: null, cargo: [], tgt: null, spd: 0, street: '', dmg: 0,
     stats: {del: 0, perfect: 0, crashes: 0, near: 0, air: 0, top: 0, drift: 0, goons: 0, dist: 0, money: 0, boosts: 0}};
   L.vans = [v];
   return v;
@@ -1445,7 +1524,7 @@ function localStep(L){
 function packVan(v){
   var f = (v.boosting ? 1 : 0) | (v.drift ? 2 : 0) | (v.air > 0.3 ? 4 : 0) | (v.ghost > 0 ? 8 : 0) | (v.crash ? 16 : 0) | (v.powder > 0 ? 32 : 0);
   var r = function(n, k){ return Math.round(n * k) / k; };
-  var a = [r(v.x, 100), r(v.z, 100), r(v.y, 100), r(v.h, 1000), r(v.vx, 100), r(v.vz, 100), r(v.vy, 100), r(v.yaw, 1000), r(v.boost, 1000), f];
+  var a = [r(v.x, 100), r(v.z, 100), r(v.y, 100), r(v.h, 1000), r(v.vx, 100), r(v.vz, 100), r(v.vy, 100), r(v.yaw, 1000), r(v.boost, 1000), f, r(v.dmg || 0, 100)];
   if(v.crash) a.push(r(v.crash.ax, 100), r(v.crash.ay, 100), r(v.crash.az, 100), r(v.crash.h, 100));
   return a;
 }
@@ -1462,13 +1541,14 @@ function snap(S){
     if(sc >= 6) return;
     var row = [o.id, o.kind === 'walk' ? 1 : 0, sc, o.ri, o.house, Math.round(o.fresh * 100), o.van, o.by || '', o.prio ? 1 : 0,
       Math.max(0, Math.round(o.patience - (S.t - o.born))), o.who, o.pref];
-    if(o.state === 'arr' && o.arr) row.push(o.arr.st.join(','), o.arr.wrap || '', o.arr.rib || '');
+    if(o.state === 'arr' && o.arr) row.push(o.arr.st.join(','), o.arr.wrap || '', o.arr.rib || '',
+      (o.arr.pos || []).map(function(q){ return [q[0], q[1] === null ? null : Math.round(q[1] * 1000) / 1000, q[2] === null ? null : Math.round(q[2] * 1000) / 1000, Math.round(q[3] * 100) / 100]; }));
     out.ord.push(row);
   });
   S.vans.forEach(function(v){ out.vans.push([Math.round(v.x), Math.round(v.z), Math.round(v.h * 100) / 100, v.cargo.length, v.name, v.owner || '', v.crash ? 1 : 0, v.tgt && v.tgt.k === 'house' ? v.tgt.id : -1]); });
   S.goons.forEach(function(g){ if(g.st !== 'gone') out.goons.push([Math.round(g.x), Math.round(g.z), g.carry != null ? 1 : 0]); });
   S.pings.forEach(function(p){ out.pings.push([Math.round(p.x), Math.round(p.z), p.k]); });
-  if(S.roles.grow > 0) out.gar = S.garden.map(function(p){ return [p.f, Math.round(p.water * 100), Math.round(p.grow * 100)]; });
+  if(S.roles.grow > 0){ out.gar = S.garden.map(function(p){ return [p.f, Math.round(p.water * 100), Math.round(p.grow * 100)]; }); out.gn = S.gardenN; }
   if(S.parade) out.par = {t: Math.round(S.parade.t), dur: S.parade.dur, ch: S.cheers};
   return out;
 }
@@ -1488,7 +1568,7 @@ function vanInfo(S, i){
     tgtInfo = {k: v.tgt.k, d: Math.round(Math.hypot(tp.x - v.x, tp.z - v.z)),
       name: v.tgt.k === 'house' ? M.houses[v.tgt.id].addr : M.shops[v.tgt.id].name};
   }
-  return {spd: Math.round(v.spd * 2.237), bst: Math.round(v.boost * 100), b: v.boosting ? 1 : 0, pw: v.powder > 0 ? 1 : 0,
+  return {dmg: Math.round((v.dmg || 0) * 100), spd: Math.round(v.spd * 2.237), bst: Math.round(v.boost * 100), b: v.boosting ? 1 : 0, pw: v.powder > 0 ? 1 : 0,
     cr: v.crash ? 1 : 0, cargo: cargo, toss: tg, tgt: tgtInfo, st: v.street, dr: v.drift ? 1 : 0, name: v.name, air: v.air > 0.3 ? 1 : 0};
 }
 

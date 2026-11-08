@@ -16,4 +16,6 @@ Enter and drive with the arrow keys.
 - Flower photos: public domain (CC0 / Public Domain Mark) via Openverse:
   rawpixel and a Flickr photo from Allan Gardens, Toronto. Sources in
   `web/flowers/credits.json`.
+- Sound engine and instruments from Family Beatdown (synthesized, no
+  sample files).
 - three.js (MIT), PeerJS.

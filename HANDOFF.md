@@ -46,6 +46,7 @@ carnations, daisies and fern, arranged into proper bouquets.
 | `web/world.js` | Draws the static town in three.js: ground from the surface raster, road paint, canals, instanced houses and trees, the neon sign, temple, water tower, mountains, sky. |
 | `web/view.js` | The moving parts in 3D, shared by phone and TV: vans, traffic, goons, bouquet sprites, petals, smoke, fireballs, the porch beam, the route, the chase camera. |
 | `web/drive.js` | The driver's phone: its own van's physics, the 3D chase view, what it tells the TV. |
+| `web/snd.js` | The sound: Family Beatdown's synth engine (baked instruments, the pattern notation, the sequencer) with Watson's five songs and its effects bank on top. `WSound.unlock/fx/music/mute`. |
 | `web/bouquet.js` | Draws a bouquet from the real flowers (2D canvas): used on the phones' bench and cards, the TV's cooler and cards, and as the 3D sprites. |
 | `web/flowers/` | The flower cut-outs and `credits.json`. Made by `tools/flowers.py`. |
 | `web/net.js`, `web/qr.js` | Connection (PeerJS, or BroadcastChannel with `?local=1`) and the QR code, from Mission Control. |
@@ -136,13 +137,19 @@ more person always helps.
   x0.6, missed = the order goes back to be remade. The driver's TOSS button
   auto-aims but gets sloppy with speed - a tosser is better.
 - **Arranger**: claims an order card (each shows a picture of the finished
-  bouquet), taps in the stems the card asks for (photo buttons; the bench
-  draws the bouquet as it grows),
-  picks wrap and ribbon, DONE. Quality: -12% per wrong stem, -12% wrong
-  wrap or ribbon, +12% if done inside 12 s. Stems come out of the shared
+  bouquet). **Arrange** mode: drag stems from the tray onto the bouquet,
+  drag one to move it, drag it off to take it out; where each was put is
+  kept (`o.arr.pos`, `[flower, x, y, rot]`) and is the bouquet the cooler,
+  the TV and the porch show. **Easy (tap)** mode for little ones: tap a
+  stem and it goes in wherever looks right. Pick wrap and ribbon, DONE
+  (the page scrolls; DONE is a sticky footer). Quality: -12% per wrong
+  stem, -12% wrong wrap or ribbon, +10% inside 20 s (+5% inside 35 s),
+  +6% for a balanced hand layout. Stems come out of the shared
   cooler. Walk-ins (green cards) appear whenever there are arrangers and pay
   straight away, so a room full of arrangers always has work.
-- **Grower**: Irene's garden, 12 plots. Water dries out faster as it gets
+- **Grower**: Irene's garden, 12, 24 or 36 plots (any phone picks; 12
+  fits one screen, the bigger ones pan with a finger). Each plot shows its
+  flower's photo growing; tap to water, tap a bloom to cut it. Water dries out faster as it gets
   hotter; a plant in bloom cut = +5 stems. Without growers a wholesale truck
   restocks steadily; with them it slows to a trickle.
 - **Dispatcher**: the whole map. Tap a van then an order: ready orders are
@@ -184,11 +191,24 @@ made, and what is in the cooler).
   Main Street, Valentine's, Mother's Day - different recipes. Family record
   per holiday in the TV's localStorage (`wats_save`).
 
+## Camera views (driver's phone, the View button)
+
+Chase (high enough to see over the van), High (further back, more road),
+Hood (driver's seat, van hidden), Low (the old close one). Kept in
+`localStorage` `wats_view`. Numbers in `VIEWS` in `view.js`.
+
 ## Driving numbers (simcheck prints them)
 
 0-60 mph ~1.9 s, top ~97 mph, boost ~104+ mph (black powder 165). A quarter
-turn at 30 mph under 1 s. Crash: more than 16 m/s into something solid or
-13 m/s closing on a car. Crashes lose half the cargo (all of it in a canal)
+turn at 30 mph under 1 s. Crash: more than 24 m/s (~54 mph) into something solid or
+20 m/s closing on a car (`CRASH_V`, `CRASH_CAR`). Anything softer dents the
+van instead: `v.dmg` 0-1 lowers top speed up to 15%, smokes over 0.55 and
+at 1 the van is WRECKED (a crash). Respawn patches it to 0.3. Low brick
+walls don't stop you: you plough through (slowed to 55-85%), the bricks
+fly, it dents, and the wall is back in 2 minutes (`S.wallsDown`, synced to
+phones as `bw`). Cars hit hard fly, spin and roll; the first 1.4 s of a
+crash plays at 0.35x on the driver's phone. Ramps are orange with
+yellow/black chevrons, blinking lights and JUMP! signs. Crashes lose half the cargo (all of it in a canal)
 and the orders go back to be remade; 2.8 s of tumbling crash-cam, then the
 van reappears on the nearest road, ghosted for 2.2 s. Boost fills from
 drifts, near misses (within ~1.5 m of a car at 15+ m/s closing), air time,
@@ -217,6 +237,12 @@ van, by, prio, secsLeft, customer, pref, stems, wrap, ribbon]`.
 - The computer driver must keep right (a lane offset on its look-ahead
   point) - on the centre line it deadlocked with oncoming traffic that had
   stopped for it.
+- Water is blue everywhere: a blue plane sits under the whole map (the
+  desert is a frame of four planes round it), so nothing reads as a hole.
+- Building faces are wound outward per face in `boxesGeo`; mixed winding
+  was what made walls vanish.
+- In a scrolling flex column, give the children `flex: none` or the card
+  squashes and overlaps what follows (`#bench > *`).
 - Headless Chromium renders at ~5 fps in software, so the local join
   timeout is 8 s and netcheck's waits are long.
 
@@ -226,13 +252,14 @@ van, by, prio, secsLeft, customer, pref, stems, wrap, ribbon]`.
   unknown: tune `full` (32 deg) and the curve in `tiltSteer()` after the
   first family drive. iPhones need the motion permission tap (the GO button
   asks).
-- **No repo/deploy yet**: needs a GitHub repo and a Cloudflare Worker
-  pointed at it like the other games. The relay (TURN) needs the same two
-  secrets as Mission Control.
+- The relay (TURN) needs the same two secrets as Mission Control.
 - The 3D town on a phone: untested on real phones for frame rate. It is the
   same scene the TV draws (instanced houses and trees, a few dozen draw
   calls). If an older phone struggles: `renderer.setPixelRatio(1)` and a
   shorter fog in `drive.js`.
-- Music is a small synthesized loop, not the recorded-instrument pipeline
-  the other games use (`tools/music.py` from Mission Control would port).
+- Sound needs a tap: browsers stay silent until someone touches the page.
+  The TV shows a pill until a key press or click; phones unlock on the
+  first tap. Music: Main Street 1927 (lobby), Delivery Rush (day), Haboob
+  (6 p.m.), Gilbert Days Parade, Closing Time - in `snd.js` below
+  "WATSON'S FLOWERS - the songs". Not heard on real devices yet.
 - No voice lines, no crash replays (the crash cam is live).

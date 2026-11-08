@@ -208,7 +208,7 @@ function build(G, seed){
       var ax = x0 + (x1 - x0) * a, az = z0 + (z1 - z0) * a, bx = x0 + (x1 - x0) * b, bz = z0 + (z1 - z0) * b;
       var t = 0.5;
       var bb = horiz ? addBox(ax, az - t, bx, bz + t, 1.9, 'wall') : addBox(ax - t, az, bx + t, bz, 1.9, 'wall');
-      if(bb) walls.push(bb);
+      if(bb){ bb.bi = boxes.length - 1; bb.wi = walls.length; walls.push(bb); }
     }
   }
   function addTree(x, z, k){
@@ -673,14 +673,14 @@ function build(G, seed){
         var segL = Math.hypot(bx - ax, bz - az);
         var along = l.axis === 'ns' ? Math.abs(bz - az) / segL : Math.abs(bx - ax) / segL;
         if(along > 0.75) continue;
-        var off = l.w / 2 + 1.4, len = 9, wid = 4, gap = CANAL_W / 2 + BANK_W + 1;
+        var off = l.w / 2 + 1.6, len = 11, wid = 5, gap = CANAL_W / 2 + BANK_W + 1;
         [-1, 1].forEach(function(dir){        // travelling towards +axis (dir 1) or -axis
           var side = l.axis === 'ns' ? -dir : dir;   // the right-hand shoulder for that direction
           var end = (l.axis === 'ns' ? cz : cx) - dir * gap;
           var start = end - dir * len;
           var lat = l.p + side * off;
-          if(l.axis === 'ns') ramps.push({x0: lat - wid / 2, x1: lat + wid / 2, z0: Math.min(start, end), z1: Math.max(start, end), dx: 0, dz: dir, s0: start, h: 2.0, len: len});
-          else ramps.push({z0: lat - wid / 2, z1: lat + wid / 2, x0: Math.min(start, end), x1: Math.max(start, end), dx: dir, dz: 0, s0: start, h: 2.0, len: len});
+          if(l.axis === 'ns') ramps.push({x0: lat - wid / 2, x1: lat + wid / 2, z0: Math.min(start, end), z1: Math.max(start, end), dx: 0, dz: dir, s0: start, h: 2.4, len: len});
+          else ramps.push({z0: lat - wid / 2, z1: lat + wid / 2, x0: Math.min(start, end), x1: Math.max(start, end), dx: dir, dz: 0, s0: start, h: 2.4, len: len});
         });
       }
     });

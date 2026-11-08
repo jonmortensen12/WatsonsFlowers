@@ -47,7 +47,9 @@ export function start(opts){
   let last = performance.now(), acc = 0;
   const physics = setInterval(() => {
     const now = performance.now();
-    acc += Math.min(0.25, (now - last) / 1000); last = now;
+    // the first second and a half of a crash plays in slow motion (on this phone only)
+    const slow = v && v.crash && v.crash.t < 1.4 ? 0.35 : 1;
+    acc += Math.min(0.25, (now - last) / 1000) * slow; last = now;
     while(acc >= SIM.DT){
       acc -= SIM.DT;
       if(!v) continue;
@@ -63,27 +65,40 @@ export function start(opts){
     }
   }, 1000 / 60);
 
+  function snd(k, v){ if(window.WSound) WSound.fx(k, v); }
   function onLocal(e){
     // things the TV needs to know, and things to see right here
+    if(e.k === 'wall'){
+      opts.send({t: 've', e: {k: 'wall', b: e.b}});
+      if(V){ V.event(e); world.setWall(e.b, false); }
+      snd('wall'); buzz(30);
+      return;
+    }
+    if(e.k === 'dent'){ snd('dent'); if(V) V.event(e); opts.hud.flash(e.dmg >= 0.75 ? 'The van is in bad shape!' : 'Ouch - a dent', '#ffb23a'); buzz(40); return; }
     if(e.k === 'crash'){
+      snd('crash', e.imp);
       opts.send({t: 've', e: {k: 'crash', cause: e.cause, imp: Math.round(e.imp * 10) / 10, car: e.car, vx: e.vx, vz: e.vz, kaboom: e.kaboom}});
       if(V){ V.event(e); V.shake(0, 1.4); }
       opts.hud.flash('CRASH!', '#ff5a5a', true);
       buzz([60, 40, 120]);
     } else if(e.k === 'near'){
       opts.send({t: 've', e: {k: 'near', x: Math.round(e.x), z: Math.round(e.z), rel: Math.round(e.rel)}});
+      snd('near');
       opts.hud.flash('NEAR MISS!', '#7fe0ff');
       buzz(25);
     } else if(e.k === 'smash'){
       opts.send({t: 've', e: {k: 'smash', p: e.p}});
+      snd('smash');
       if(V){ V.event(e); world.setProp(e.p, false); }
     } else if(e.k === 'land' && !e.how){
       if(e.air > 0.55) opts.send({t: 've', e: {k: 'land', air: Math.round(e.air * 100) / 100}});
+      if(e.air > 0.55) snd('land');
       if(e.air > 0.9){ opts.hud.flash(e.air.toFixed(1) + 's of air!', '#ffd23f'); if(V) V.event(e); }
     } else if(e.k === 'air'){ opts.hud.flash('AIRTIME!', '#ffd23f'); }
     else if(e.k === 'respawn'){ opts.send({t: 've', e: {k: 'respawn'}}); }
-    else if(e.k === 'bump'){ if(V) V.shake(0, Math.min(1, e.imp / 12)); if(e.imp > 8) buzz(20); }
-    else if(e.k === 'carhit' || e.k === 'thud'){ if(V) V.event(e); }
+    else if(e.k === 'bump'){ if(V) V.shake(0, Math.min(1, e.imp / 12)); snd('bump', e.imp); if(e.imp > 8) buzz(20); }
+    else if(e.k === 'carhit'){ if(V) V.event(e); snd('carhit', e.big > 0.6); if(e.boom) snd('boom'); }
+    else if(e.k === 'carbounce' || e.k === 'thud'){ if(V) V.event(e); snd(e.k === 'thud' ? 'thud' : 'carbounce'); }
   }
   function buzz(p){ try { if(navigator.vibrate) navigator.vibrate(p); } catch(e){} }
 
@@ -119,13 +134,27 @@ export function start(opts){
       br.forEach(id => { if(!L.broken[id]){ L.broken[id] = 1e9; world.setProp(id, false); } });
     } else br.forEach(id => { L.broken[id] = 1e9; });
     pickupsOff = new Set(w.pk || []);
+    const bw = new Set(w.bw || []);
+    Object.keys(L.wallsDown).forEach(k => { if(!bw.has(+k) && L.t - L.wallsDown[k] > -110) delete L.wallsDown[k]; });
+    bw.forEach(b => { if(!L.wallsDown[b]) L.wallsDown[b] = L.t + 120; });
+    if(world) world.syncWalls(new Set(Object.keys(L.wallsDown).map(Number)));
     if(v && w.tgt){ v.tgt = w.tgt; const k = w.tgt.k + w.tgt.id; if(k !== tgtKey){ tgtKey = k; routeT = 0; } }
     else if(v){ v.tgt = null; }
-    (w.ev || []).forEach(e => { if(V){ V.holiday = hol; V.event(e); } if(e.k === 'smash' && world) world.setProp(e.p, false); });
+    (w.ev || []).forEach(e => {
+      if(V){ V.holiday = hol; V.event(e); }
+      if(e.k === 'smash' && world) world.setProp(e.p, false);
+      if(e.k === 'toss') snd('toss');
+      else if(e.k === 'crash') snd('crash', e.imp);
+      else if(e.k === 'carhit') snd('carhit');
+      else if(e.k === 'boom') snd('boom');
+    });
   }
   function drv(d){ resetVan(d); }
   function fx(f){
     if(!v) return;
+    const S2 = {powder: 'powder', boom: 'boom', ice: 'cash', goonhit: 'bonk', gooned: 'gooned', mist: 'water', load: 'load'};
+    if(S2[f.k]) snd(S2[f.k]);
+    if(f.k === 'land' && f.how) snd(f.how);
     if(f.k === 'powder'){ v.powder = 4; v.boost = 1; opts.hud.flash('BLACK POWDER!', '#ff7a1a', true); buzz([30, 20, 30, 20, 200]); }
     else if(f.k === 'boom'){ v.vy = 15; v.y += 0.5; v.air = 0.01; v.boost = 1; const sp = Math.hypot(v.vx, v.vz) || 1; v.vx += v.vx / sp * 8; v.vz += v.vz / sp * 8; opts.hud.flash("GRANDPA'S CANAL BLAST!", '#ff7a1a', true); buzz([30, 20, 30, 20, 300]); }
     else if(f.k === 'ice'){ v.boost = Math.min(1, v.boost + 0.2); opts.hud.flash('ICE! Fresh as a daisy', '#9fe8ff'); }
@@ -138,6 +167,31 @@ export function start(opts){
   }
   function input(IN){ if(v){ v.st = IN.st; v.gas = IN.gas; v.brk = IN.brk; v.bst = IN.bst; } }
 
+  /* ---- the engine and the tyres ---- */
+  let eng = null, wasBoost = false;
+  function engineSound(){
+    const a = window.WSound && WSound.ctx();
+    if(!a || a.state !== 'running' || !v) return;
+    if(!eng){
+      const o = a.createOscillator(), o2 = a.createOscillator(), f = a.createBiquadFilter(), g = a.createGain();
+      o.type = 'sawtooth'; o2.type = 'square'; o2.detune.value = 9; f.type = 'lowpass'; f.frequency.value = 500; g.gain.value = 0;
+      o.connect(f); o2.connect(f); f.connect(g); g.connect(WSound.out()); o.start(); o2.start();
+      const nb = a.createBuffer(1, a.sampleRate, a.sampleRate), d = nb.getChannelData(0); for(let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      const sq = a.createBufferSource(); sq.buffer = nb; sq.loop = true;
+      const sf = a.createBiquadFilter(); sf.type = 'bandpass'; sf.frequency.value = 1500; sf.Q.value = 7;
+      const sg = a.createGain(); sg.gain.value = 0; sq.connect(sf); sf.connect(sg); sg.connect(WSound.out()); sq.start();
+      eng = {o, o2, f, g, sg};
+    }
+    const t = a.currentTime, on = phase === 'day' && !v.crash && !WSound.muted();
+    const base = 40 + v.spd * 2.3 + (v.boosting ? 40 : 0);
+    eng.o.frequency.setTargetAtTime(base, t, 0.04); eng.o2.frequency.setTargetAtTime(base * 0.5, t, 0.04);
+    eng.f.frequency.setTargetAtTime(380 + v.spd * 28 + (v.gas ? 450 : 0), t, 0.05);
+    eng.g.gain.setTargetAtTime(on ? 0.035 + (v.gas ? 0.03 : 0) + (v.boosting ? 0.03 : 0) : 0, t, 0.06);
+    eng.sg.gain.setTargetAtTime(on && v.drift && v.spd > 12 ? 0.07 : 0, t, 0.04);
+    if(v.boosting && !wasBoost) snd('boost');
+    wasBoost = v.boosting;
+  }
+
   /* ---- drawing, at the screen's own rate ---- */
   let frameT = performance.now(), t = 0, raf = 0;
   function frame(){
@@ -148,13 +202,14 @@ export function start(opts){
       if(routeT <= 0 && v.tgt){ routeT = 1.5; const place = v.tgt.k === 'house' ? M.housePlace(v.tgt.id) : M.shopPlace(v.tgt.id); route = M.route(v.x, v.z, place); }
     }
     opts.hud.update(v, info, cam, t);
+    engineSound();
     if(!renderer || !v) return;
     const W = opts.canvas.clientWidth, H = opts.canvas.clientHeight;
     if(opts.canvas.width !== Math.round(W * renderer.getPixelRatio()) || opts.canvas.height !== Math.round(H * renderer.getPixelRatio())) renderer.setSize(W, H, false);
     const a = Math.max(0, Math.min(1, acc / SIM.DT));
     const x = v.px != null ? v.px + (v.x - v.px) * a : v.x, z = v.pz != null ? v.pz + (v.z - v.pz) * a : v.z, y = v.py != null ? v.py + (v.y - v.py) * a : v.y;
     let h = v.h; if(v.ph != null){ let d = v.h - v.ph; d = Math.atan2(Math.sin(d), Math.cos(d)); h = v.ph + d * a; }
-    const me = {x, y, z, h, crash: v.crash, boosting: v.boosting, powder: v.powder > 0, drift: v.drift, spd: v.spd, ghost: v.ghost > 0, yaw: v.yaw, air: v.air > 0.3, vy: v.vy, vx: v.vx, vz: v.vz};
+    const me = {x, y, z, h, crash: v.crash, boosting: v.boosting, powder: v.powder > 0, drift: v.drift, spd: v.spd, ghost: v.ghost > 0, yaw: v.yaw, air: v.air > 0.3, vy: v.vy, vx: v.vx, vz: v.vz, dmg: v.dmg};
     V.placeVan(0, me, dt, t);
     // the other vans
     others.forEach(o => {
@@ -171,7 +226,7 @@ export function start(opts){
     V.tick(dt, {x: gust.x * dust * 2, z: gust.z * dust * 2});
     world.updateLights({t: srvT});
     world.updatePickups({pickupT: new Proxy({}, {get: (o, k) => pickupsOff.has(+k) ? 1e9 : 0}), t: 0, boomUsed: pickupsOff.has(-1)}, t);
-    V.chase(cam, me, 0, dt, W / Math.max(1, H));
+    V.chase(cam, me, 0, dt, W / Math.max(1, H), opts.view ? opts.view() : 'chase');
     world.update(clk, dust, t, cam.position);
     renderer.render(scene, cam);
   }

@@ -65,7 +65,9 @@ function draw(g, x, y, size, b){
   var blooms = [];
   KEYS.forEach(function(k, i){ if(k !== 'greens') for(var n = 0; n < (st[i] || 0); n++) blooms.push(k); });
   var nb = blooms.length;
-  var greens = (st[6] || 0) * 2 + (nb ? 3 : 0);
+  var pos = b.pos && b.pos.length ? b.pos : null;
+  var placedGreens = pos ? pos.filter(function(q){ return q[0] === 6 && q[1] !== null; }) : [];
+  var greens = pos ? (st[6] || 0) - placedGreens.length + (nb ? 3 : 0) : (st[6] || 0) * 2 + (nb ? 3 : 0);
   var dome = Math.max(S * 0.1, Math.min(S * 0.33, S * 0.15 * Math.sqrt(Math.max(1, nb))));
   g.save();
 
@@ -86,6 +88,15 @@ function draw(g, x, y, size, b){
       g.drawImage(gi, -w / 2, -len, w, len);
       g.restore();
     }
+    // fern put somewhere by hand: a frond from the pinch out to that spot
+    placedGreens.forEach(function(q){
+      var tx = x + q[1] * S, ty = top + q[2] * S, fx = cx, fy = pinchY - S * 0.1;
+      var len2 = Math.max(S * 0.3, Math.hypot(tx - fx, ty - fy) + S * 0.12);
+      g.save(); g.translate(fx, fy); g.rotate(Math.atan2(tx - fx, -(ty - fy)));
+      var w2 = len2 * gi.naturalWidth / gi.naturalHeight;
+      g.drawImage(gi, -w2 / 2, -len2, w2, len2);
+      g.restore();
+    });
   }
   // the blooms: biggest in the middle, a golden-angle spiral outwards,
   // the back ones a little higher and a little darker
@@ -97,7 +108,21 @@ function draw(g, x, y, size, b){
     return {k: k, x: cx + sx * r * 1.12, y: domeY + sy * r * 0.7 + (r / (dome + 1)) * S * 0.05,
             s: S * SIZE[k] * 1.45 * (0.9 + R() * 0.18) * (nb > 10 ? 0.85 : 1), rot: (R() - 0.5) * 0.5 + sx * 0.25, back: sy < -0.3};
   });
-  spots.sort(function(p, q){ return p.y - q.y; });
+  // flowers put by hand go where they were put, in the order they were put
+  if(pos){
+    var auto = spots.slice(), out = [];
+    pos.forEach(function(q, n){
+      if(q[0] === 6) return;
+      var k = KEYS[q[0]];
+      if(q[1] === null){
+        var j = -1; for(var m = 0; m < auto.length; m++) if(auto[m].k === k){ j = m; break; }
+        if(j >= 0){ out.push(auto[j]); auto.splice(j, 1); }
+        return;
+      }
+      out.push({k: k, x: x + q[1] * S, y: top + q[2] * S, s: S * SIZE[k] * 1.45, rot: q[3] || 0, n: n, hand: true});
+    });
+    spots = out;
+  } else spots.sort(function(p, q){ return p.y - q.y; });
   spots.forEach(function(p){
     if(!ok(p.k)) return;
     var im = IMG[p.k], w = p.s, h = w * im.naturalHeight / im.naturalWidth;
@@ -156,5 +181,5 @@ function canvas(b, w){
   return c;
 }
 
-root.WBouquet = {load: load, draw: draw, fromRecipe: fromRecipe, canvas: canvas, KEYS: KEYS, img: IMG, isReady: function(){ return ready; }};
+root.WBouquet = {SIZE: SIZE, load: load, draw: draw, fromRecipe: fromRecipe, canvas: canvas, KEYS: KEYS, img: IMG, isReady: function(){ return ready; }};
 })(typeof window !== 'undefined' ? window : globalThis);

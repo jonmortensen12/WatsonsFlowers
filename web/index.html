@@ -29,6 +29,7 @@
 <script src="net.js"></script>
 <script src="qr.js"></script>
 <script src="bouquet.js"></script>
+<script src="snd.js"></script>
 <script type="module">
 import * as THREE from './lib/three.module.min.js';
 import {buildWorld, makeSign, labelTex, canvas as mkCanvas, tex} from './world.js';
@@ -524,6 +525,10 @@ function onEvent(e){
     case 'thud': sfx('thud'); break;
     case 'bump': sfx('bump', e.imp); break;
     case 'smash': world.setProp(e.p, false); brokenShown[e.p] = true; sfx('smash'); break;
+    case 'wall': world.setWall(e.b, false); sfx('wall'); break;
+    case 'dent': sfx('dent'); phoneFx(e.v, 'dent', {dmg: e.dmg}); break;
+    case 'carhit': sfx('carhit', e.big > 0.6); if(e.boom) sfx('boom'); break;
+    case 'carbounce': sfx('carbounce'); break;
     case 'near': feature(e.v, 1.6, 'NEAR MISS!', '#7fe0ff'); sfx('whoosh'); break;
     case 'land':
       if(e.how){
@@ -577,12 +582,12 @@ function worldTick(){
   const live = G.phase === 'day' || G.phase === 'count';
   const pk = M.pickups.filter(q => (S.pickupT[q.id] || 0) > S.t || (q.k === 'boom' && S.boomUsed)).map(q => q.id);
   if(S.boomUsed) pk.push(-1);
-  const br = Object.keys(S.broken).map(Number);
+  const br = Object.keys(S.broken).map(Number), bw = Object.keys(S.wallsDown).map(Number);
   const r1 = n => Math.round(n * 10) / 10, r2 = n => Math.round(n * 100) / 100;
   Object.values(NET.people).forEach(p => {
     if(p.role !== 'drive' || !p.conn) return;
     const v = p.van >= 0 && S.vans[p.van];
-    const w = {t: 'w', st: r2(S.t), clk: r2(S.clock), dust: r2(S.dust), gx: r1(S.gust.x), gz: r1(S.gust.z), ph: live ? S.ph : G.phase, hol: S.holiday, br, pk};
+    const w = {t: 'w', st: r2(S.t), clk: r2(S.clock), dust: r2(S.dust), gx: r1(S.gust.x), gz: r1(S.gust.z), ph: live ? S.ph : G.phase, hol: S.holiday, br, pk, bw};
     if(v){
       w.cars = [];
       S.cars.forEach(c => {
@@ -629,6 +634,7 @@ function frame(){
     world.updateLights(S);
     world.updatePickups(S, wallT);
     if(Math.random() < 0.05) Object.keys(brokenShown).forEach(id => { if(!S.broken[id]){ world.setProp(+id, true); delete brokenShown[id]; } });
+    if(Math.random() < 0.05) world.syncWalls(S.wallsDown);
     S.vans.forEach((v, i) => {
       const o = V.van(i, v.color, v.name);
       const x = v.px != null ? v.px + (v.x - v.px) * alpha : v.x, z = v.pz != null ? v.pz + (v.z - v.pz) * alpha : v.z;
@@ -692,6 +698,7 @@ function frame(){
     if(!NORENDER) renderer.render(scene, overview);
     drawLobby();
   }
+  drawSoundPill();
   if(document.getElementById('loading')) document.getElementById('loading').remove();
 }
 /* which van the action cam is on */
@@ -773,10 +780,20 @@ function bouquetPic(ri, w){
   return (bqCache[key] = WBouquet.canvas(WBouquet.fromRecipe(r, ri + 3), w));
 }
 const benchCache = {};
+/* a made bouquet looks the way its arranger made it */
+const orderCache = {};
+function orderPic(o, w){
+  if(!o.pos) return bouquetPic(o.ri, w);
+  const key = o.id + ':' + w;
+  if(orderCache[key]) return orderCache[key];
+  const r = SIM.HOLIDAYS[G.S.holiday].recipes[o.ri];
+  const st = SIM.FLOWERS.map(() => 0); o.pos.forEach(q => st[q[0]]++);
+  return (orderCache[key] = WBouquet.canvas({st, pos: o.pos, wrap: (o.made && o.made.wrap) || r.wrap, rib: (o.made && o.made.rib) || r.rib, seed: o.id}, w));
+}
 function benchPic(o, w){
-  const key = o.id + ':' + o.arr.st.join(',') + (o.arr.wrap || '') + (o.arr.rib || '');
+  const key = o.id + ':' + o.arr.st.join(',') + (o.arr.wrap || '') + (o.arr.rib || '') + JSON.stringify(o.arr.pos || []);
   if(benchCache[o.id] && benchCache[o.id].key === key) return benchCache[o.id].c;
-  const c = WBouquet.canvas({st: o.arr.st, wrap: o.arr.wrap, rib: o.arr.rib, seed: o.id}, w);
+  const c = WBouquet.canvas({st: o.arr.st, pos: o.arr.pos, wrap: o.arr.wrap, rib: o.arr.rib, seed: o.id}, w);
   benchCache[o.id] = {key, c};
   return c;
 }
@@ -947,6 +964,11 @@ function drawBoard(B, dt){
     H.fillStyle = v.color; H.fillRect(x, y + 8, 5, chh - 16);
     txt(v.name + (v.remote ? '' : v.owner === 'kbd' ? ' (keyboard)' : ' (computer)'), x + 14, y + 16, 15, '#fff');
     txt(Math.round(v.spd * 2.237) + ' mph', x + cw - 10, y + 16, 15, v.boosting ? '#7fd0ff' : '#ddd', 'right');
+    // the dents
+    const dm = v.dmg || 0;
+    H.fillStyle = 'rgba(255,255,255,0.12)'; H.fillRect(x + cw - 70, y + 30, 58, 6);
+    H.fillStyle = dm > 0.75 ? '#ff4a3a' : dm > 0.4 ? '#ffb23a' : '#9ad06a'; H.fillRect(x + cw - 70, y + 30, 58 * dm, 6);
+    txt('damage', x + cw - 74, y + 33, 10, '#aaa', 'right', '600');
     // the bouquets aboard, drawn from the real flowers
     const bw = Math.min(34, (cw - 20) / 6 - 2);
     for(let k = 0; k < SIM.CAP; k++){
@@ -954,13 +976,13 @@ function drawBoard(B, dt){
       H.fillStyle = 'rgba(255,255,255,0.07)'; H.fillRect(bx, by, bw, bw * 1.2);
       const o = v.cargo[k] != null && SIM.orderById(S, v.cargo[k]);
       if(o){
-        H.drawImage(bouquetPic(o.ri, 60), bx, by, bw, bw * 1.3);
+        H.drawImage(orderPic(o, 60), bx, by, bw, bw * 1.3);
         H.fillStyle = o.fresh > 0.6 ? '#7dff6b' : o.fresh > 0.3 ? '#ffd23f' : '#ff6a3a';
         H.fillRect(bx, by + bw * 1.2 + 1, bw * o.fresh, 3);
       }
     }
     let status;
-    if(v.crash) status = ['CRASHED!', '#ff6a6a'];
+    if(v.crash) status = [v.crash.cause === 'wrecked' ? 'WRECKED! Patching it up...' : 'CRASHED!', '#ff6a6a'];
     else if(v.tgt){
       const tp = SIM.targetPoint(S, v), d = tp ? Math.round(Math.hypot(tp.x - v.x, tp.z - v.z)) : 0;
       status = v.tgt.k === 'house' ? ['→ ' + M.houses[v.tgt.id].addr + '  ' + d + ' m', '#f7cfd6'] : ['→ ' + M.shops[v.tgt.id].name + '  ' + d + ' m', '#ffe6a0'];
@@ -989,7 +1011,7 @@ function drawBoard(B, dt){
     }
     txt('In the cooler' + (ready.length ? '' : ' - empty'), x, sp[1] + 36, 12, '#9fe8ff');
     ready.slice(0, Math.floor((sp[0] + sp[2] - x) / (pw * 0.75))).forEach((o, k) => {
-      H.drawImage(bouquetPic(o.ri, 90), x + k * pw * 0.75, sp[1] + 44, pw, ph);
+      H.drawImage(orderPic(o, 90), x + k * pw * 0.75, sp[1] + 44, pw, ph);
     });
     if(S.roles.grow > 0){
       const gy = sp[1] + sp[3] - 12;
@@ -1022,49 +1044,65 @@ function drawQR(x, y, size){
   for(let i = 0; i < n; i++) for(let j = 0; j < n; j++) if(m[i][j]) H.fillRect(x + (j + 4) * c, y + (i + 4) * c, Math.ceil(c), Math.ceil(c));
 }
 function drawLobby(){
-  const W = VW, Hh = VH;
-  // a title in the sign's colours
-  const tw = Math.min(620, W * 0.5);
-  H.fillStyle = '#f2a7b4'; roundRect(H, 40, 40, tw, 120, 12); H.fill();
-  H.strokeStyle = '#d97a8c'; H.lineWidth = 6; H.stroke();
-  H.font = '900 ' + Math.round(tw / 7) + 'px "Arial Black", Impact, sans-serif'; H.textAlign = 'center'; H.textBaseline = 'middle';
-  H.lineWidth = 8; H.strokeStyle = '#7a4a10'; H.strokeText('FLOWERS', 40 + tw / 2, 104); H.fillStyle = '#f2c531'; H.fillText('FLOWERS', 40 + tw / 2, 104);
-  H.fillStyle = '#1b1b1b'; H.beginPath(); H.ellipse(40 + tw * 0.3, 40, 120, 40, -0.05, 0, Math.PI * 2); H.fill();
-  H.fillStyle = '#f6f3ea'; H.beginPath(); H.ellipse(40 + tw * 0.3, 40, 112, 33, -0.05, 0, Math.PI * 2); H.fill();
-  H.fillStyle = '#151515'; H.font = 'italic bold 48px "Brush Script MT", "Segoe Script", cursive'; H.fillText("Watson's", 40 + tw * 0.3, 44);
-  txt('Mesa & Gilbert, Arizona  ·  The Best Since 1927', 44, 186, 20, '#fff');
-  // the holiday
-  const hol = HOLIDAYS[SAVE.holiday];
-  panel(40, 210, tw, 92, 0.6);
-  txt('Today: ' + hol.name, 60, 236, 24, '#f2c531');
-  txt(hol.blurb, 60, 266, 17, '#f7cfd6', 'left', '500');
-  const rec = SAVE.records[SAVE.holiday] || 0;
-  txt(rec ? 'Family record: $' + rec.toLocaleString() : 'No record yet', 60, 290, 15, '#ccc', 'left', '500');
-  // the code
-  const qs = Math.min(240, Hh * 0.3);
-  const qx = W - qs - 40, qy = 40;
-  panel(qx - 16, qy - 16, qs + 32, qs + 110, 0.7);
+  const W = VW, Hh = VH, u = Math.max(0.55, Math.min(W / 1600, Hh / 900)), pad = Math.round(24 * u);
+  const fit = (t, maxW) => { if(H.measureText(t).width <= maxW) return t; while(t.length > 1 && H.measureText(t + '…').width > maxW) t = t.slice(0, -1); return t + '…'; };
+  // the join code: a card on the right
+  const q = Math.round(Math.min(Hh * 0.34, W * 0.2));
+  const qx = W - pad - q - 20 * u, qy = pad;
+  panel(qx - 20 * u, qy, q + 40 * u, q + 96 * u, 0.82);
   if(NET.code){
-    drawQR(qx, qy, qs);
-    txt('Scan to join', qx + qs / 2, qy + qs + 24, 20, '#fff', 'center');
-    txt('code ' + NET.code, qx + qs / 2, qy + qs + 54, 26, '#f2c531', 'center');
-  } else txt(NET.status, qx + qs / 2, qy + qs / 2, 16, '#fff', 'center');
-  // who is doing what
+    drawQR(qx, qy + 20 * u, q);
+    txt('Scan to join', qx + q / 2, qy + q + 44 * u, Math.round(20 * u), '#fff', 'center');
+    txt('code ' + NET.code, qx + q / 2, qy + q + 74 * u, Math.round(26 * u), '#f2c531', 'center');
+  } else txt(NET.status, qx + q / 2, qy + q / 2, Math.round(16 * u), '#fff', 'center');
+  // the sign, in its own colours, to the left
+  const lw = Math.min(qx - 2 * pad - 20 * u, 640 * u), lh = lw * 0.2;
+  const ly = pad + lh * 0.55;
+  H.fillStyle = '#f2a7b4'; roundRect(H, pad, ly, lw, lh, 12 * u); H.fill();
+  H.strokeStyle = '#d97a8c'; H.lineWidth = 6 * u; H.stroke();
+  H.font = '900 ' + Math.round(lh * 0.62) + 'px "Arial Black", Impact, sans-serif'; H.textAlign = 'center'; H.textBaseline = 'middle';
+  H.lineWidth = 7 * u; H.strokeStyle = '#7a4a10'; H.strokeText('FLOWERS', pad + lw / 2, ly + lh * 0.55); H.fillStyle = '#f2c531'; H.fillText('FLOWERS', pad + lw / 2, ly + lh * 0.55);
+  const ox = pad + lw * 0.28, oy = ly, orx = lw * 0.19, ory = lh * 0.42;
+  H.fillStyle = '#1b1b1b'; H.beginPath(); H.ellipse(ox, oy, orx, ory, -0.05, 0, Math.PI * 2); H.fill();
+  H.fillStyle = '#f6f3ea'; H.beginPath(); H.ellipse(ox, oy, orx * 0.93, ory * 0.84, -0.05, 0, Math.PI * 2); H.fill();
+  H.fillStyle = '#151515'; H.font = 'italic bold ' + Math.round(ory * 1.2) + 'px "Brush Script MT", "Segoe Script", cursive'; H.fillText("Watson's", ox, oy + ory * 0.1);
+  let y = ly + lh + 30 * u;
+  txt('Mesa & Gilbert, Arizona  ·  The Best Since 1927', pad + 4 * u, y, Math.round(19 * u), '#fff');
+  // today
+  y += 24 * u;
+  const hol = HOLIDAYS[SAVE.holiday], tw = lw, th = 96 * u;
+  panel(pad, y, tw, th, 0.72);
+  txt('Today: ' + hol.name, pad + 18 * u, y + 26 * u, Math.round(24 * u), '#f2c531');
+  H.font = '500 ' + Math.round(17 * u) + 'px system-ui'; txt(fit(hol.blurb, tw - 36 * u), pad + 18 * u, y + 54 * u, Math.round(17 * u), '#f7cfd6', 'left', '500');
+  const rec = SAVE.records[SAVE.holiday] || 0;
+  txt(rec ? 'Family record: $' + rec.toLocaleString() : 'No family record yet', pad + 18 * u, y + 80 * u, Math.round(15 * u), '#ccc', 'left', '500');
+  // the crew, by job, across the bottom
+  // just tall enough for the longest list, at the bottom, so the sign shows
   const ppl = Object.values(NET.people);
+  const counts = {}; ppl.forEach(p => { const r = p.role || 'none'; counts[r] = (counts[r] || 0) + 1; });
+  const longest = Math.max(1, ...Object.values(counts));
+  const bottom = Hh - pad - (WSound.on() ? 0 : 52);
+  const minTop = Math.max(y + th, qy + q + 96 * u) + pad;
+  const ch = Math.max(90 * u, Math.min(bottom - minTop, (78 + Math.min(longest, 8) * 24) * u));
+  const top = bottom - ch;
+  if(ch < 80 * u) return;
+  panel(pad, top, W - 2 * pad, ch, 0.72);
+  txt(ppl.length ? 'Pick a job on your phone, then press START on any phone' : 'Join with your phone. No phones? Press Enter and drive with the arrow keys.', pad + 20 * u, top + 26 * u, Math.round(19 * u), '#fff');
   const by = {};
   ppl.forEach(p => { (by[p.role || 'none'] = by[p.role || 'none'] || []).push(p); });
-  const cols = ['drive', 'toss', 'arrange', 'grow', 'dispatch', 'cart', 'none'];
-  const tops = Hh * 0.52, colW = Math.min(220, (W - 80) / 4);
-  panel(40, tops - 46, W - 80, Hh - tops + 10, 0.55);
-  txt(ppl.length ? 'Pick a job on your phone, then press START on any phone' : 'Everyone joins with their phone. No phones? Press Enter and drive with the arrow keys.', 60, tops - 22, 20, '#fff');
+  const cols = ['drive', 'toss', 'arrange', 'grow', 'dispatch', 'cart'];
+  if(by.none) cols.push('none');
+  const n = cols.length, cw = (W - 2 * pad - 40 * u) / n, rowH = Math.round(24 * u);
+  const maxRows = Math.max(1, Math.floor((ch - 72 * u) / rowH));
   cols.forEach((r, i) => {
-    const cx = 60 + (i % 4) * colW, cy = tops + 16 + Math.floor(i / 4) * (Hh - tops) * 0.45;
-    const list = by[r] || [];
-    txt(r === 'none' ? 'Choosing...' : ROLE_NAMES[r] + (r === 'drive' ? 's (up to 6)' : r === 'cart' ? '' : 's'), cx, cy, 18, r === 'none' ? '#aaa' : '#f2c531');
-    list.slice(0, 7).forEach((p, k) => txt((p.conn ? '' : '(away) ') + p.name, cx + 6, cy + 24 + k * 22, 17, p.conn ? '#fff' : '#888', 'left', '500'));
-    if(!list.length && r !== 'none') txt(r === 'drive' ? 'computer' : r === 'arrange' ? 'computer (slow)' : r === 'grow' ? 'wholesale truck' : r === 'dispatch' ? 'automatic' : '-', cx + 6, cy + 24, 15, '#999', 'left', '500');
+    const cx = pad + 20 * u + i * cw, cy = top + 64 * u, list = by[r] || [];
+    H.font = 'bold ' + Math.round(18 * u) + 'px system-ui';
+    txt(fit(r === 'none' ? 'Choosing...' : ROLE_NAMES[r] + (r === 'drive' ? 's' : r === 'cart' ? '' : 's'), cw - 12 * u), cx, cy, Math.round(18 * u), r === 'none' ? '#aaa' : '#f2c531');
+    H.font = '500 ' + Math.round(17 * u) + 'px system-ui';
+    list.slice(0, list.length > maxRows ? maxRows - 1 : maxRows).forEach((p, k) => txt(fit((p.conn ? '' : '(away) ') + p.name, cw - 16 * u), cx + 4 * u, cy + rowH * (k + 1.1), Math.round(17 * u), p.conn ? '#fff' : '#888', 'left', '500'));
+    if(list.length > maxRows) txt('+' + (list.length - maxRows + 1) + ' more', cx + 4 * u, cy + rowH * (maxRows + 0.1), Math.round(15 * u), '#ccc', 'left', '500');
+    if(!list.length && r !== 'none') txt(r === 'drive' ? 'the computer' : r === 'arrange' ? 'computer (slow)' : r === 'grow' ? 'wholesale truck' : r === 'dispatch' ? 'automatic' : '-', cx + 4 * u, cy + rowH * 1.1, Math.round(15 * u), '#999', 'left', '500');
   });
-  txt('Grandpa Quist grew up around this shop. Irene Watson started it selling roses door to door in 1927.', W - 40, Hh - 18, 14, 'rgba(255,255,255,0.65)', 'right', '500');
 }
 
 function drawResults(final){
@@ -1096,140 +1134,52 @@ function drawParadeHud(){
 }
 
 /* ---------------- sound ---------------- */
-let AC = null, master = null, muted = false, musicGain = null, engines = [];
-function soundOn(){
-  if(AC){ if(AC.state === 'suspended') AC.resume(); return; }
-  try {
-    if(navigator.audioSession) navigator.audioSession.type = 'playback';
-    AC = new (window.AudioContext || window.webkitAudioContext)();
-    master = AC.createGain(); master.gain.value = muted ? 0 : 0.6; master.connect(AC.destination);
-    musicGain = AC.createGain(); musicGain.gain.value = 0.22; musicGain.connect(master);
-    noiseBuf = AC.createBuffer(1, AC.sampleRate, AC.sampleRate);
-    const d = noiseBuf.getChannelData(0); for(let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-    startMusic();
-  } catch(e){ AC = null; }
-}
-function toggleMute(){ muted = !muted; if(master) master.gain.value = muted ? 0 : 0.6; }
-let noiseBuf = null;
-function tone(f, d, type, vol, t0, slide){
-  if(!AC) return;
-  const t = AC.currentTime + (t0 || 0);
-  const o = AC.createOscillator(), g = AC.createGain();
-  o.type = type || 'sine'; o.frequency.setValueAtTime(f, t);
-  if(slide) o.frequency.exponentialRampToValueAtTime(slide, t + d);
-  g.gain.setValueAtTime(vol || 0.2, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
-  o.connect(g); g.connect(master); o.start(t); o.stop(t + d + 0.05);
-}
-function noise(d, f, q, vol, t0, type, f2){
-  if(!AC) return;
-  const t = AC.currentTime + (t0 || 0);
-  const s = AC.createBufferSource(); s.buffer = noiseBuf; s.loop = true;
-  const fl = AC.createBiquadFilter(); fl.type = type || 'bandpass'; fl.frequency.setValueAtTime(f, t); fl.Q.value = q || 1;
-  if(f2) fl.frequency.exponentialRampToValueAtTime(f2, t + d);
-  const g = AC.createGain(); g.gain.setValueAtTime(vol || 0.3, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
-  s.connect(fl); fl.connect(g); g.connect(master); s.start(t, Math.random()); s.stop(t + d + 0.05);
-}
-const sfxLast = {};
-function sfx(k, v){
-  if(!AC) return;
-  const now = AC.currentTime;
-  if(sfxLast[k] && now - sfxLast[k] < 0.05) return;
-  sfxLast[k] = now;
-  switch(k){
-    case 'click': tone(880, 0.06, 'square', 0.06); break;
-    case 'crash': noise(0.9, 900, 0.6, 0.7, 0, 'lowpass', 120); tone(70, 0.5, 'sine', 0.6, 0, 35); for(let i = 0; i < 6; i++) tone(1200 + Math.random() * 2400, 0.15, 'triangle', 0.08, 0.05 + Math.random() * 0.5); break;
-    case 'thud': tone(90, 0.2, 'sine', 0.3, 0, 50); noise(0.15, 400, 1, 0.15); break;
-    case 'bump': noise(0.12, 600, 1, Math.min(0.3, (v || 5) / 30)); break;
-    case 'smash': noise(0.18, 1800, 1.5, 0.18); tone(300 + Math.random() * 300, 0.1, 'triangle', 0.08); break;
-    case 'whoosh': noise(0.4, 400, 2, 0.25, 0, 'bandpass', 2400); break;
-    case 'toss': noise(0.3, 600, 3, 0.15, 0, 'bandpass', 1800); break;
-    case 'perfect': [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.25, 'triangle', 0.18, i * 0.07)); tone(2093, 0.4, 'sine', 0.08, 0.3); break;
-    case 'porch': [523, 784].forEach((f, i) => tone(f, 0.22, 'triangle', 0.16, i * 0.08)); break;
-    case 'lawn': tone(440, 0.25, 'triangle', 0.14); break;
-    case 'miss': tone(330, 0.3, 'sawtooth', 0.1, 0, 300); tone(262, 0.5, 'sawtooth', 0.1, 0.3, 220); break;
-    case 'load': [660, 880].forEach((f, i) => tone(f, 0.12, 'sine', 0.12, i * 0.06)); break;
-    case 'mist': noise(0.8, 5000, 0.5, 0.08, 0, 'highpass'); break;
-    case 'fuse': noise(1.2, 3000, 2, 0.12, 0, 'bandpass', 5000); break;
-    case 'boom': tone(55, 1.2, 'sine', 0.8, 0, 28); noise(1.4, 500, 0.5, 0.8, 0, 'lowpass', 80); break;
-    case 'splash': noise(0.9, 1200, 0.6, 0.5, 0, 'lowpass', 300); break;
-    case 'goon': tone(600, 0.15, 'square', 0.08, 0, 900); tone(500, 0.3, 'square', 0.08, 0.15, 200); break;
-    case 'bonk': tone(220, 0.15, 'square', 0.15, 0, 110); noise(0.1, 2000, 2, 0.15); break;
-    case 'bell': [988, 1319].forEach((f, i) => tone(f, 0.5, 'sine', 0.12, i * 0.12)); break;
-    case 'ding': tone(1568, 0.3, 'sine', 0.08); break;
-    case 'cash': tone(2637, 0.08, 'square', 0.06); tone(3136, 0.25, 'sine', 0.08, 0.08); break;
-    case 'rose': tone(1760, 0.15, 'sine', 0.05); break;
-    case 'ping': tone(1200, 0.1, 'sine', 0.12); tone(1200, 0.1, 'sine', 0.12, 0.15); break;
-    case 'cheer': for(let i = 0; i < 4; i++) noise(0.6, 1500 + Math.random() * 1500, 1, 0.08, i * 0.08); break;
-  }
-}
-function cue(k){
-  if(!AC) return;
-  if(k === 'count') tone(660, 0.18, 'square', 0.12);
-  if(k === 'go'){ tone(880, 0.5, 'square', 0.14); tone(1320, 0.5, 'square', 0.08); }
-  if(k === 'goons'){ [392, 370, 349, 330].forEach((f, i) => tone(f, 0.2, 'sawtooth', 0.08, i * 0.15)); }
-  if(k === 'haboob') noise(3, 200, 0.5, 0.3, 0, 'lowpass', 600);
-  if(k === 'end') [523, 659, 784, 1047, 784, 1047].forEach((f, i) => tone(f, 0.3, 'triangle', 0.14, i * 0.14));
-  if(k === 'cheer') sfx('cheer');
+/* All of it is snd.js (Family Beatdown's engine, Watson's songs and
+   effects). A browser keeps a page silent until somebody touches that
+   device, so the TV shows a pill until it has had a tap or a key. */
+let engines = [];
+function soundOn(){ WSound.unlock(); setTimeout(() => WSound.kick(), 50); }
+function toggleMute(){ WSound.mute(!WSound.muted()); }
+const SFX_NAME = {whoosh: 'near', fuse: 'powder', goon: 'gooned', mist: 'water'};
+function sfx(k, v){ WSound.fx(SFX_NAME[k] || k, v); }
+function cue(k){ WSound.fx(k); }
+let musicPhase = 'lobby';
+function musicMode(m){ musicPhase = m; }
+function musicTick(){
+  const S = G.S;
+  let want = 'mainstreet';
+  if(G.phase === 'day' || G.phase === 'count') want = S.dust > 0.25 ? 'haboob' : 'rush';
+  else if(G.phase === 'end' || G.phase === 'results') want = 'closing';
+  else if(G.phase === 'parade') want = 'parade';
+  if(G.paused) want = null;
+  WSound.music(want);
 }
 /* the engine: one hum, for whichever van the action cam is on */
 function engineTick(){
-  if(!AC) return;
+  const a = WSound.ctx(); if(!a || a.state !== 'running') return;
   const S = G.S, v = S.vans[featured()];
   let e = engines[0];
   if(!e){
-    const o = AC.createOscillator(), o2 = AC.createOscillator(), f = AC.createBiquadFilter(), g = AC.createGain();
+    const o = a.createOscillator(), o2 = a.createOscillator(), f = a.createBiquadFilter(), g = a.createGain();
     o.type = 'sawtooth'; o2.type = 'square'; o2.detune.value = 7; f.type = 'lowpass'; f.frequency.value = 600; g.gain.value = 0;
-    o.connect(f); o2.connect(f); f.connect(g); g.connect(master); o.start(); o2.start();
+    o.connect(f); o2.connect(f); f.connect(g); g.connect(WSound.out()); o.start(); o2.start();
     e = engines[0] = {o, o2, f, g};
   }
-  const on = (G.phase === 'day' || G.phase === 'count') && v && !v.crash;
-  const t = AC.currentTime, spd = v ? v.spd : 0;
+  const on = (G.phase === 'day' || G.phase === 'count') && v && !v.crash && !WSound.muted();
+  const t = a.currentTime, spd = v ? v.spd : 0;
   const base = 38 + spd * 2.4 + (v && v.boosting ? 35 : 0);
   e.o.frequency.setTargetAtTime(base, t, 0.05); e.o2.frequency.setTargetAtTime(base * 0.5, t, 0.05);
   e.f.frequency.setTargetAtTime(400 + spd * 30, t, 0.05);
-  e.g.gain.setTargetAtTime(on ? 0.04 + (v.boosting ? 0.03 : 0) : 0, t, 0.08);
+  e.g.gain.setTargetAtTime(on ? 0.02 + (v.boosting ? 0.015 : 0) : 0, t, 0.08);
 }
-
-/* music: a little sequenced loop - a walking bass, a brushed beat and a
-   twangy tune, written out here rather than recorded */
-let musicState = 'lobby', musicStep = 0, musicNext = 0;
-const SONGS = {
-  lobby: {bpm: 96, bass: [45, 0, 52, 0, 50, 0, 52, 0, 43, 0, 50, 0, 48, 0, 50, 0], lead: [69, 0, 0, 72, 0, 74, 72, 0, 67, 0, 0, 0, 69, 0, 67, 64]},
-  day: {bpm: 132, bass: [40, 40, 47, 40, 45, 45, 52, 45, 43, 43, 50, 43, 47, 47, 54, 47], lead: [64, 0, 67, 69, 0, 71, 69, 67, 64, 0, 62, 64, 0, 0, 59, 0]},
-  parade: {bpm: 116, bass: [48, 0, 55, 0, 53, 0, 55, 0, 48, 0, 52, 0, 55, 0, 52, 0], lead: [72, 74, 76, 0, 79, 0, 76, 74, 72, 0, 69, 0, 72, 0, 0, 0]},
-  results: {bpm: 100, bass: [48, 0, 52, 0, 55, 0, 52, 0, 53, 0, 57, 0, 55, 0, 52, 0], lead: [76, 0, 74, 0, 72, 0, 74, 76, 0, 79, 0, 76, 74, 0, 72, 0]}
-};
-function startMusic(){ musicNext = AC.currentTime + 0.1; }
-function musicMode(m){ musicState = m; musicStep = 0; }
-function mtof(n){ return 440 * Math.pow(2, (n - 69) / 12); }
-function musicTick(){
-  if(!AC || !musicGain) return;
-  const song = SONGS[musicState] || SONGS.lobby;
-  const step = 60 / song.bpm / 2;
-  const hot = G.phase === 'day' && G.S.dust > 0.2;
-  while(musicNext < AC.currentTime + 0.2){
-    const t = musicNext, i = musicStep % 16;
-    const b = song.bass[i];
-    if(b) pluck(mtof(b - 12), step * 1.6, 'triangle', 0.5, t);
-    const l = song.lead[i];
-    if(l && (musicStep % 32 < 16 || musicState !== 'day' || i % 2 === 0)) pluck(mtof(l), step * 1.2, 'sawtooth', 0.12, t, true);
-    if(i % 4 === 0) kick(t);
-    if(i % 4 === 2) brush(t, 0.25);
-    if(i % 2 === 1) brush(t, 0.08);
-    if(hot && i % 8 === 0) brush(t, 0.2);
-    musicStep++; musicNext += step;
-  }
+function drawSoundPill(){
+  if(WSound.on()) return;
+  const t = '🔊  Tap this screen (or press a key) for music and sound';
+  H.font = 'bold 18px system-ui'; const w = H.measureText(t).width + 40;
+  H.fillStyle = 'rgba(242,197,49,' + (0.85 + 0.15 * Math.sin(wallT * 4)) + ')'; const py = VH - 56;
+  roundRect(H, VW / 2 - w / 2, py, w, 40, 20); H.fill();
+  txt(t, VW / 2, py + 20, 18, '#2a1418', 'center');
 }
-function pluck(f, d, type, vol, t, twang){
-  const o = AC.createOscillator(), g = AC.createGain(), fl = AC.createBiquadFilter();
-  o.type = type; o.frequency.setValueAtTime(f, t);
-  if(twang){ o.frequency.setValueAtTime(f * 0.97, t); o.frequency.linearRampToValueAtTime(f, t + 0.05); }
-  fl.type = 'lowpass'; fl.frequency.setValueAtTime(twang ? 2600 : 900, t); fl.frequency.exponentialRampToValueAtTime(300, t + d);
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
-  o.connect(fl); fl.connect(g); g.connect(musicGain); o.start(t); o.stop(t + d + 0.05);
-}
-function kick(t){ const o = AC.createOscillator(), g = AC.createGain(); o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(40, t + 0.15); g.gain.setValueAtTime(0.6, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2); o.connect(g); g.connect(musicGain); o.start(t); o.stop(t + 0.25); }
-function brush(t, vol){ const s = AC.createBufferSource(); s.buffer = noiseBuf; const f = AC.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 5000; const g = AC.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.08); s.connect(f); f.connect(g); g.connect(musicGain); s.start(t, Math.random()); s.stop(t + 0.1); }
 
 /* ---------------- go ---------------- */
 resize();
@@ -1238,7 +1188,7 @@ setInterval(tick, 1000 / 60);
 setInterval(broadcast, 100);
 setInterval(sweep, 1000);
 setInterval(worldTick, 50);
-setInterval(() => { engineTick(); musicTick(); }, 50);
+setInterval(() => { engineTick(); musicTick(); }, 100);
 rebuildVans();
 requestAnimationFrame(frame);
 // for netcheck and the curious

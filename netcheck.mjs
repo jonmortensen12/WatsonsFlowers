@@ -111,7 +111,22 @@ const order = await tv.evaluate(() => { const S = WTV.G.S; const o = S.orders.fi
 const FL = await aunt.evaluate(() => WSim.FLOWERS.map(f => f.k));
 try { await aunt.waitForFunction(() => document.querySelectorAll('#aStems .stem').length >= 7, null, {polling: 250, timeout: 30000}); }
 catch(e){ console.log(await aunt.evaluate(() => JSON.stringify([cur, myOrder(), document.querySelectorAll('#aStems .stem').length, benchBuilt, getComputedStyle(document.getElementById('bench')).display, SNAP.hol, ME]))); throw e; }
-for(const [k, n] of Object.entries(order.st)) for(let i = 0; i < n; i++){ await aunt.evaluate(j => document.querySelectorAll('#aStems .stem')[j].click(), FL.indexOf(k)); await sleep(60); }
+// the first flower by hand: drag it from the tray onto the bouquet
+await aunt.evaluate(() => setMode('arrange'));
+const want = Object.entries(order.st).flatMap(([k, n]) => Array(n).fill(k));
+{
+  const bin = await aunt.evaluate(j => { const r = document.querySelectorAll('#aStems .stem')[j].getBoundingClientRect(); return {x: r.x + r.width / 2, y: r.y + r.height / 2}; }, FL.indexOf(want[0]));
+  const vase = await aunt.evaluate(() => { const r = document.getElementById('vase').getBoundingClientRect(); return {x: r.x + r.width / 2, y: r.y + r.height * 0.35}; });
+  await aunt.mouse.move(bin.x, bin.y); await aunt.mouse.down();
+  await aunt.mouse.move((bin.x + vase.x) / 2, (bin.y + vase.y) / 2, {steps: 4}); await aunt.mouse.move(vase.x, vase.y, {steps: 4});
+  await aunt.mouse.up();
+  await sleep(500);
+}
+const placed = await tv.evaluate(id => { const o = WSim.orderById(WTV.G.S, id); return o && o.arr && o.arr.pos[0]; }, order.id);
+ok(placed && placed[1] !== null, 'a flower dragged onto the bouquet stays where it was put: ' + JSON.stringify(placed));
+// the rest the easy way: tap mode
+await aunt.evaluate(() => setMode('tap'));
+for(const k of want.slice(1)){ await aunt.evaluate(j => document.querySelectorAll('#aStems .stem')[j].click(), FL.indexOf(k)); await sleep(60); }
 await aunt.evaluate(w => document.querySelector('#aWrap button[data-k="' + w + '"]').click(), order.wrap);
 await aunt.evaluate(w => document.querySelector('#aRib button[data-k="' + w + '"]').click(), order.rib);
 await sleep(300);
@@ -121,11 +136,16 @@ const made = await tv.evaluate(id => { const o = WSim.orderById(WTV.G.S, id); re
 ok(made && made.state !== 'arr' && made.q >= 1, "Aunt's arrangement went into the cooler at " + Math.round((made && made.q) * 100) + '%');
 
 // Grandma waters, Tiny sells a rose, Uncle pings
-try { await grandma.waitForFunction(sel => { const e = document.querySelector(sel); return e && e.getClientRects().length > 0; }, '#plots .plot', {polling: 250, timeout: 30000}); }
-catch(e){ console.log(await grandma.evaluate(() => JSON.stringify([cur, ME.role, !!SNAP.gar, SNAP.ppl]))); console.log(await tv.evaluate(() => JSON.stringify([WTV.G.S.roles, Object.values(WTV.NET.people).map(p => [p.name, p.role, !!p.conn, Math.round(performance.now() - p.seen)])]))); throw e; }
-await grandma.locator('#plots .plot').first().click();
-await sleep(300);
-ok(await tv.evaluate(() => WTV.G.S.ppl[Object.values(WTV.NET.people).find(p => p.name === 'Grandma').id].watered >= 0), 'the garden takes water');
+await grandma.waitForFunction(() => cur === 'grow' && SNAP && SNAP.gar && document.getElementById('gcan').clientWidth > 0, null, {polling: 250, timeout: 30000});
+const plot = await grandma.evaluate(() => { const r = document.getElementById('gcan').getBoundingClientRect(), G2 = gardenGeom(), p = plotXY(G2, 1); return {x: r.x + p.x + G2.cell / 2, y: r.y + p.y + G2.cell / 2}; });
+await grandma.mouse.click(plot.x, plot.y);
+await sleep(500);
+const wat = await tv.evaluate(() => { const q = WTV.G.S.ppl[Object.values(WTV.NET.people).find(p => p.name === 'Grandma').id]; return q.watered >= 1 || q.harvested >= 1; });
+if(!wat) console.log('   garden state:', await tv.evaluate(() => JSON.stringify({ph: WTV.G.S.ph, t: WTV.G.S.t, phase: WTV.G.phase, ppl: Object.values(WTV.NET.people).map(p => [p.name, !!p.conn, Math.round(performance.now() - p.seen)])})), await grandma.evaluate(() => JSON.stringify({cur, ph: SNAP && SNAP.ph, gar: SNAP && SNAP.gar && SNAP.gar.length, joined, conn: !!conn})));
+ok(wat, 'tapping a plant in the garden waters it (or cuts it, if it is in bloom)');
+await grandma.evaluate(() => document.querySelector('#gsize button[data-n="36"]').click());
+await sleep(500);
+ok(await tv.evaluate(() => WTV.G.S.garden.length === 36), 'the garden grows to 36 plots for a bigger challenge');
 const roseBefore = await tv.evaluate(() => WTV.G.S.roses);
 for(let i = 0; i < 40 && (await tv.evaluate(() => WTV.G.S.roses)) === roseBefore; i++){
   const pt = await tiny.evaluate(() => { const c = document.getElementById('ccan'); const W = c.width / (c._dpr || 1); const p = CART.people.find(p => p.want && !p.happy && Math.abs(p.x - CART.x * W) < W * 0.3 && p.x > 10 && p.x < W - 10); return p ? {x: p.x, y: p.y - 25} : null; });
@@ -135,7 +155,7 @@ for(let i = 0; i < 40 && (await tv.evaluate(() => WTV.G.S.roses)) === roseBefore
 ok(await tv.evaluate(() => WTV.G.S.roses) > roseBefore, 'the rose cart sold a rose');
 const map = await uncle.locator('#dmap').boundingBox();
 await uncle.mouse.move(map.x + map.width / 2, map.y + map.height / 2);
-await uncle.mouse.down(); await sleep(800); await uncle.mouse.up();
+await uncle.mouse.down(); await sleep(1600); await uncle.mouse.up();
 await sleep(200);
 ok(await tv.evaluate(() => WTV.G.S.pings.length > 0), 'dispatch pinged the map');
 

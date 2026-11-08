@@ -131,6 +131,7 @@ export function createView(scene, M, opts){
     o.shadow.position.set(s.x, gy + 0.07, s.z); o.shadow.rotation.y = -s.h; o.shadow.material.opacity = Math.max(0.05, 0.35 - (s.y - gy) * 0.04);
     if(s.drift && s.spd > 12 && Math.random() < 0.6) V.puff(s.x - Math.cos(s.h) * 2.2, 0.4, s.z - Math.sin(s.h) * 2.2, 1, '#e6e1d8', 0.8, 0.8);
     if(s.powder && Math.random() < 0.5) V.puff(s.x - Math.cos(s.h) * 3, 1, s.z - Math.sin(s.h) * 3, 1, '#444', 0.9, 1.5);
+    if((s.dmg || 0) > 0.55 && !s.crash && Math.random() < (s.dmg - 0.45) * 0.6) V.puff(s.x + Math.cos(s.h) * 2.2, s.y + 1.6, s.z + Math.sin(s.h) * 2.2, 1, s.dmg > 0.8 ? '#333' : '#888', 0.7, 2);
   };
   V.target = function(i, tp, t){
     const o = V.vans[i]; if(!o) return;
@@ -303,6 +304,42 @@ export function createView(scene, M, opts){
     SM.forEach(p => { const s = p.s * Math.min(1, p.life); _m.makeScale(s, s, s).setPosition(p.x, p.y, p.z); smoke.setMatrixAt(n, _m); smoke.setColorAt(n, _c.set(p.c)); n++; });
     smoke.count = n; smoke.instanceMatrix.needsUpdate = true; if(smoke.instanceColor) smoke.instanceColor.needsUpdate = true;
   }
+  /* chunks: bricks, body panels, glass - little boxes that fly, bounce and lie there */
+  const CH_MAX = 900;
+  const chunks = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({color: '#fff'}), CH_MAX);
+  chunks.count = 0; chunks.frustumCulled = false; chunks.setColorAt(0, new THREE.Color('#fff')); scene.add(chunks);
+  const CH = [];
+  V.chunks = function(x, y, z, vx, vz, n, colors, size, spread, up){
+    for(let i = 0; i < n; i++){
+      if(CH.length >= CH_MAX) CH.shift();
+      const a = Math.random() * Math.PI * 2, sp = Math.random() * (spread || 6);
+      const sz = (size || 0.35) * (0.6 + Math.random() * 0.8);
+      CH.push({x: x + (Math.random() - 0.5) * 1.5, y: y + Math.random() * 0.8, z: z + (Math.random() - 0.5) * 1.5,
+        vx: vx * 0.7 + Math.cos(a) * sp, vy: (up || 5) * (0.5 + Math.random()), vz: vz * 0.7 + Math.sin(a) * sp,
+        rx: Math.random() * 6, ry: Math.random() * 6, rz: 0, wx: (Math.random() - 0.5) * 16, wy: (Math.random() - 0.5) * 16,
+        sx: sz * 1.6, sy: sz * 0.8, sz: sz, c: colors[i % colors.length], life: 18 + Math.random() * 6});
+    }
+  };
+  function drawChunks(dt){
+    let n = 0;
+    for(let i = CH.length - 1; i >= 0; i--){
+      const p = CH[i]; p.life -= dt;
+      if(p.life <= 0){ CH.splice(i, 1); continue; }
+      if(p.y > p.sy / 2 || p.vy > 0){
+        p.vy -= 22 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt; p.rx += p.wx * dt; p.ry += p.wy * dt;
+        if(p.y < p.sy / 2){ p.y = p.sy / 2; if(p.vy < -3){ p.vy = -p.vy * 0.3; p.vx *= 0.6; p.vz *= 0.6; p.wx *= 0.5; } else { p.vy = 0; p.vx = p.vz = 0; p.rx = Math.round(p.rx / Math.PI) * Math.PI; } }
+      }
+    }
+    for(let i = 0; i < CH.length; i++){
+      const p = CH[i], k = Math.min(1, p.life / 2);
+      _e.set(p.rx, p.ry, 0); _q.setFromEuler(_e); _p.set(p.x, p.y, p.z); _s.set(p.sx * k, p.sy * k, p.sz * k);
+      _m.compose(_p, _q, _s); chunks.setMatrixAt(n, _m); chunks.setColorAt(n, _c.set(p.c)); n++;
+    }
+    chunks.count = n; chunks.instanceMatrix.needsUpdate = true; if(chunks.instanceColor) chunks.instanceColor.needsUpdate = true;
+  }
+  /* sparks: short bright streaks */
+  V.sparks = function(x, y, z, n){ V.burst(x, y, z, 0, 0, n, ['#fff6a0', '#ffd23f', '#ff9a2a'], 9); };
+
   const booms = [];
   V.fireball = function(x, y, z, size, color){
     const m = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({color: color || '#ffa63a', transparent: true, opacity: 0.95}));
@@ -327,13 +364,13 @@ export function createView(scene, M, opts){
     }
   }
   V.clear = function(){
-    P.length = 0; SM.length = 0;
+    P.length = 0; SM.length = 0; CH.length = 0;
     flying.forEach(f => scene.remove(f.m)); flying.length = 0;
     porches.forEach(f => scene.remove(f.m)); porches.length = 0;
     booms.forEach(b => { if(b.m) scene.remove(b.m); if(b.light) scene.remove(b.light); }); booms.length = 0;
   };
   V.tick = function(dt, wind){
-    drawFlying(dt); drawPetals(dt, wind || {x: 0, z: 0}); drawSmoke(dt); drawBooms(dt);
+    drawFlying(dt); drawPetals(dt, wind || {x: 0, z: 0}); drawSmoke(dt); drawBooms(dt); drawChunks(dt);
   };
 
   /* ---- what an event looks like (both screens) ---- */
@@ -344,9 +381,25 @@ export function createView(scene, M, opts){
         V.puff(e.x, (e.y || 0) + 0.5, e.z, 14, '#8a8a8a', 1.6, 2);
         if(e.cause === 'canal') V.burst(e.x, 0, e.z, 0, 0, 160, ['#d9f4f7', '#ffffff', '#9fdde3'], 7);
         if(e.kaboom) V.fireball(e.x, (e.y || 0) + 1, e.z, 9);
+        // the van comes apart a bit: white panels, glass, sparks, a hubcap
+        V.chunks(e.x, (e.y || 0) + 1, e.z, e.vx || 0, e.vz || 0, 26, ['#fbfbf7', '#fbfbf7', '#f2a7b4', '#26323d', '#bfe3ff', '#1c1c1c'], 0.45, 8, 8);
+        V.sparks(e.x, (e.y || 0) + 0.8, e.z, 40);
+        if(e.imp > 30) V.fireball(e.x, (e.y || 0) + 1, e.z, 5, '#ffb04a');
         break;
+      case 'wall':
+        // a block wall going over: bricks and dust
+        V.chunks(e.x, 1, e.z, e.vx || 0, e.vz || 0, 34, ['#cdb38c', '#c4a77d', '#b8996e', '#d8c29c'], 0.38, 4, 5);
+        V.puff(e.x, 0.8, e.z, 8, '#d8c6a8', 1.4, 1.2);
+        break;
+      case 'dent': V.puff(e.x, 1.5, e.z, 4, '#666', 0.8, 1.5); V.sparks(e.x, 1, e.z, 12); break;
+      case 'carbounce': V.puff(e.x, 0.3, e.z, 3, '#c8b49a'); V.chunks(e.x, 0.6, e.z, 0, 0, 4, ['#222', '#9aa3ad', '#bfe3ff'], 0.3, 3, 3); break;
       case 'spill': V.burst(e.x, (e.y || 0) + 1.5, e.z, e.vx || 0, e.vz || 0, e.lost.length * 120, V.flowerColors(e.lost), 10); break;
-      case 'carhit': V.puff(e.x, 0.5, e.z, 6, '#9a9a9a'); V.burst(e.x, 1, e.z, 0, 0, 30, ['#c9c9c9', '#888', '#2a2a2a'], 6); break;
+      case 'carhit':
+        V.puff(e.x, 0.5, e.z, 8, '#9a9a9a');
+        V.chunks(e.x, 1, e.z, e.vx || 0, e.vz || 0, 10 + Math.round((e.big || 0.5) * 20), ['#c8312f', '#2f5fc8', '#9aa3ad', '#222', '#bfe3ff', '#e8e8e8'], 0.4, 7, 7);
+        V.sparks(e.x, 0.8, e.z, 30);
+        if(e.boom){ V.fireball(e.x, 1.2, e.z, 8); V.puff(e.x, 2, e.z, 16, '#333', 2, 3); }
+        break;
       case 'thud': V.puff(e.x, 0.3, e.z, 4, '#c8b49a'); break;
       case 'smash': {
         const col = e.kind === 'bin' ? ['#2f6b3f', '#e8e8e8', '#7a6a5a'] : e.kind === 'bush' ? ['#7a9a4a', '#5f7f3a'] : e.kind === 'bale' ? ['#d8b45a', '#e8c86a'] : ['#8d8d8d', '#bbb'];
@@ -371,8 +424,16 @@ export function createView(scene, M, opts){
   };
 
   /* ---- the chase camera ---- */
-  V.chase = function(cam, s, i, dt, aspect){
+  /* views: 'chase' (up and back, sees over the van), 'high' (well above
+     it, for seeing the streets ahead), 'low' (close behind), 'hood'
+     (from the driver's seat). */
+  const VIEWS = {chase: {back: 11.5, up: 5.8, ahead: 16, lookY: 1.0, fov: 64},
+                 high: {back: 17, up: 11, ahead: 26, lookY: 0.5, fov: 60},
+                 low: {back: 8.5, up: 3.4, ahead: 6, lookY: 1.6, fov: 66}};
+  V.chase = function(cam, s, i, dt, aspect, mode){
     const o = V.vans[i];
+    mode = mode || 'chase';
+    if(o) o.body.visible = mode !== 'hood' || !!s.crash;
     if(o.camYaw == null) o.camYaw = s.h;
     const k = 1 - Math.exp(-dt * 7);
     if(s.crash){
@@ -389,12 +450,21 @@ export function createView(scene, M, opts){
       if(sp > 6){ const mv = Math.atan2(s.vz, s.vx); let d = mv - s.h; d = Math.atan2(Math.sin(d), Math.cos(d)); want = s.h + d * 0.55; }
       let dy = want - o.camYaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
       o.camYaw += dy * (1 - Math.exp(-dt * 6));
-      const back = 8.5 + Math.min(4, sp * 0.06), up = 3.4 + (s.air ? 2 : 0);
-      _v3.set(s.x - Math.cos(o.camYaw) * back, s.y + up, s.z - Math.sin(o.camYaw) * back);
-      cam.position.lerp(_v3, 1 - Math.exp(-dt * 10));
-      const gy = M.height(cam.position.x, cam.position.z) + 1.2; if(cam.position.y < gy) cam.position.y = gy;
-      cam.lookAt(s.x + Math.cos(o.camYaw) * 6, s.y + 1.6, s.z + Math.sin(o.camYaw) * 6);
-      const wantFov = 66 + Math.min(18, sp * 0.28) + (s.boosting ? 8 : 0);
+      if(mode === 'hood'){
+        // the driver's seat: up front, looking down the road
+        _v3.set(s.x + Math.cos(s.h) * 1.4, s.y + 2.5, s.z + Math.sin(s.h) * 1.4);
+        cam.position.copy(_v3);
+        cam.lookAt(s.x + Math.cos(o.camYaw) * 40, s.y + 1.6, s.z + Math.sin(o.camYaw) * 40);
+      } else {
+        const P = VIEWS[mode] || VIEWS.chase;
+        const back = P.back + Math.min(4, sp * 0.06), up = P.up + (s.air ? 2 : 0);
+        _v3.set(s.x - Math.cos(o.camYaw) * back, s.y + up, s.z - Math.sin(o.camYaw) * back);
+        cam.position.lerp(_v3, 1 - Math.exp(-dt * 10));
+        const gy = M.height(cam.position.x, cam.position.z) + 1.2; if(cam.position.y < gy) cam.position.y = gy;
+        cam.lookAt(s.x + Math.cos(o.camYaw) * P.ahead, s.y + P.lookY, s.z + Math.sin(o.camYaw) * P.ahead);
+      }
+      const base = mode === 'hood' ? 72 : (VIEWS[mode] || VIEWS.chase).fov;
+      const wantFov = base + Math.min(18, sp * 0.28) + (s.boosting ? 8 : 0);
       o.fov += (wantFov - o.fov) * k;
       if(s.boosting) o.shake = Math.max(o.shake, 0.18);
     }

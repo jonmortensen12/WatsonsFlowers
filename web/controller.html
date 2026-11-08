@@ -85,14 +85,27 @@
   .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
   .chip { display: inline-flex; align-items: center; gap: 4px; background: rgba(0,0,0,0.06); border-radius: 10px; padding: 2px 8px; font-size: 13px; font-weight: 700; }
   .sw { width: 14px; height: 14px; border-radius: 50%; display: inline-block; border: 1px solid rgba(0,0,0,0.3); }
-  #bench { display: none; flex-direction: column; flex: 1; min-height: 0; }
-  #vase { width: 100%; height: 210px; display: block; }
+  #bench { display: none; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; touch-action: pan-y; -webkit-overflow-scrolling: touch; padding: 10px 12px 0; }
+  #bench > * { flex: none; }
+  #vase { width: 100%; height: 300px; display: block; flex: none; touch-action: none; border-radius: 16px; background: radial-gradient(ellipse at 50% 40%, #4a2a30, #24120f); }
+  .mode { display: flex; gap: 6px; align-items: center; margin: 2px 0 6px; }
+  .mode button { padding: 6px 10px; font-size: 13px; background: #3a2226; }
+  .mode button.sel { background: var(--gold); color: #3a2a00; }
+  .mode span { flex: 1; text-align: right; }
+  .foot { position: sticky; bottom: 0; display: flex; gap: 6px; background: var(--deep); padding: 8px 0 calc(10px + env(safe-area-inset-bottom)); margin-top: 8px; z-index: 2; }
+  .foot button { flex: 1; }
+  #dragImg { position: fixed; display: none; pointer-events: none; z-index: 50; object-fit: contain; filter: drop-shadow(0 6px 8px rgba(0,0,0,0.5)); }
+  #gsize { display: flex; gap: 6px; padding: 6px 10px; align-items: center; }
+  #gsize button { padding: 6px 10px; font-size: 13px; background: #3a2226; }
+  #gsize button.sel { background: var(--gold); color: #3a2a00; }
+  #gcan { flex: 1; width: 100%; min-height: 0; display: block; touch-action: none; }
+  #ddmgbar { width: 60%; height: 6px; } #ddmg { background: #9ad06a; }
   .card .pic { position: absolute; right: 8px; top: 24px; width: 54px; height: 70px; }
   .card { min-height: 92px; padding-right: 70px; }
   #bench .card { padding-right: 96px; }
   #bench .card .pic { width: 80px; height: 104px; top: 6px; }
   .stems { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
-  .stem { padding: 8px 2px; font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 2px; background: #3a2226; }
+  .stem { padding: 6px 2px; font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 1px; background: #3a2226; touch-action: none; }
   .stem img { width: 40px; height: 40px; object-fit: contain; }
   .stem.need { outline: 2px solid var(--gold); }
   .row2 { display: flex; gap: 6px; margin-top: 8px; }
@@ -111,6 +124,7 @@
 </head>
 <body>
 <div id="note"></div>
+<img id="dragImg" alt="">
 
 <!-- joining -->
 <div class="scr on" id="join" style="align-items:center; justify-content:center; text-align:center; gap:14px; padding:24px;">
@@ -145,12 +159,12 @@
   <div id="dtop"><canvas id="darrow" width="52" height="52"></canvas><span id="dtgt">Getting the van ready...</span><span id="ddist"></span></div>
   <div id="dmsg"></div>
   <canvas id="wheel" width="240" height="240"></canvas>
-  <div id="dbot"><div id="dspd">0 <small>mph</small></div><div class="bar"><div id="dbst"></div></div><div id="dcargo"></div></div>
+  <div id="dbot"><div id="dspd">0 <small>mph</small></div><div class="bar"><div id="dbst"></div></div><div class="bar" id="ddmgbar"><div id="ddmg"></div></div><div id="dcargo"></div></div>
   <div class="dz" id="bTos">TOSS</div>
   <div class="dz" id="bBst">BOOST</div>
   <div class="dz" id="bBrk">BRAKE<br>drift</div>
   <div class="dz" id="bGas">GAS</div>
-  <div class="tiny"><button id="dJobs">Jobs</button><button id="dCal">Centre</button><button id="dAuto">Auto-gas: off</button></div>
+  <div class="tiny"><button id="dJobs">Jobs</button><button id="dCal">Centre</button><button id="dView">View: Chase</button><button id="dAuto">Auto-gas: off</button></div>
   <div id="rot">Turn your phone sideways<br>and hold it like a steering wheel.</div>
   <div id="calib">
     <div style="font-size:24px; font-weight:800">Hold it like a steering wheel</div>
@@ -170,23 +184,25 @@
 <div class="scr" id="arrange">
   <div class="top"><button id="aJobs" style="padding:6px 10px">Jobs</button><b class="grow">The shop</b><span class="small" id="aStock"></span></div>
   <div class="scroll pad" id="aList"></div>
-  <div id="bench" class="pad">
+  <div id="bench">
     <div class="card" id="aCard"></div>
-    <canvas id="vase" width="600" height="420"></canvas>
-    <div class="stems" id="aStems"></div>
+    <div class="mode"><button id="aModeArr">Arrange</button><button id="aModeTap">Easy (tap)</button><span class="small" id="aHint"></span></div>
+    <canvas id="vase"></canvas>
+    <div class="stems" id="aStems" style="margin-top:8px"></div>
     <div class="small" style="margin-top:6px">Wrap</div>
     <div class="row2" id="aWrap"></div>
     <div class="small" style="margin-top:6px">Ribbon</div>
     <div class="row2" id="aRib"></div>
-    <div class="row2" style="margin-top:10px"><button id="aDrop" style="background:#3a2226">Put it back</button><button class="gold" id="aDone" style="font-size:18px">DONE</button></div>
+    <div class="foot"><button id="aDrop" style="background:#3a2226">Put it back</button><button class="gold" id="aDone" style="font-size:18px">DONE</button></div>
   </div>
 </div>
 
 <!-- the garden -->
 <div class="scr" id="grow">
   <div class="top"><button id="gJobs" style="padding:6px 10px">Jobs</button><b class="grow">Irene's garden</b><span id="gTemp"></span></div>
-  <div class="pad small">Tap a dry plant to water it (they dry fast in the heat). Tap one in full bloom to cut it for the shop.</div>
-  <div class="scroll pad"><div class="plots" id="plots"></div></div>
+  <div id="gsize"><span class="small">Garden:</span><button data-n="12">Small (one screen)</button><button data-n="24">Big</button><button data-n="36">Huge</button></div>
+  <canvas id="gcan"></canvas>
+  <div class="pad small">Tap a thirsty plant to water it (the heat dries them fast). Tap one in full bloom to cut it for the shop. Big gardens: drag to look around - the arrows point at plants that need you.</div>
 </div>
 
 <!-- dispatch -->
@@ -220,6 +236,7 @@
 <script src="sim.js"></script>
 <script src="net.js"></script>
 <script src="bouquet.js"></script>
+<script src="snd.js"></script>
 <script>
 'use strict';
 /* Watson's Flowers - the phone.
@@ -299,6 +316,9 @@ let lastTx = 0;
 function tx(m){ if(conn){ try { conn.send(m); lastTx = performance.now(); } catch(e){} } }
 function buzz(p){ try { if(navigator.vibrate) navigator.vibrate(p); } catch(e){} }
 function act(a){ tx({t: 'act', a}); }
+function sound(k){ if(window.WSound) WSound.fx(k); }
+// a phone is silent until it has been touched; every touch keeps it awake
+addEventListener('pointerdown', () => { if(window.WSound) WSound.unlock(); }, true);
 
 const SCREENS = ['join', 'jobs', 'drive', 'toss', 'arrange', 'grow', 'dispatch', 'cart', 'parade', 'results'];
 let cur = 'join', pickingJob = false;
@@ -359,6 +379,7 @@ function renderJobs(){
     b.innerHTML = '<b></b><span></span>' + (counts[k] ? '<i>' + counts[k] + '</i>' : '');
     b.querySelector('b').textContent = n; b.querySelector('span').textContent = desc;
     b.onclick = () => {
+      sound('click');
       if(k === 'drive') askMotion();
       if(k === 'toss'){ showRide(); return; }
       tx({t: 'pick', role: k}); pickingJob = false;
@@ -472,6 +493,11 @@ function send(){
 }
 /* the 3D drive (drive.js), loaded the first time this phone drives */
 let DRV = null, lastDrv = null, drvLoading = false;
+const VIEWS = [['chase', 'Chase'], ['high', 'High'], ['hood', 'Hood'], ['low', 'Low']];
+let VIEW = recall('wats_view') || 'chase';
+function showView(){ const v = VIEWS.find(q => q[0] === VIEW) || VIEWS[0]; $('dView').textContent = 'View: ' + v[1]; }
+$('dView').onclick = () => { const i = VIEWS.findIndex(q => q[0] === VIEW); VIEW = VIEWS[(i + 1) % VIEWS.length][0]; store('wats_view', VIEW); showView(); sound('click'); };
+showView();
 const NORENDER = /(^|[?&])norender=1(&|$)/.test(location.search);
 const msgs = [];
 const HUD = {
@@ -487,6 +513,9 @@ const HUD = {
     $('dspd').innerHTML = Math.round(v.spd * 2.237) + ' <small>mph</small>';
     $('dbst').style.width = Math.round((v.powder > 0 ? 1 : v.boost) * 100) + '%';
     $('dbst').style.background = v.powder > 0 ? '#ff7a1a' : v.boost > 0.99 ? '#fff' : '#7fd0ff';
+    const dm = v.dmg || 0;
+    $('ddmg').style.width = Math.round(dm * 100) + '%';
+    $('ddmg').style.background = dm > 0.75 ? '#ff4a3a' : dm > 0.4 ? '#ffb23a' : '#9ad06a';
     const g = $('darrow').getContext('2d');
     g.clearRect(0, 0, 52, 52);
     if(v.tgt && window.WSim){
@@ -513,7 +542,7 @@ function loadDrive(){
   drvLoading = true;
   WBouquet.load(() => {});
   import('./drive.js').then(m => {
-    DRV = m.start({canvas: $('d3'), hud: HUD, send: tx, norender: NORENDER});
+    DRV = m.start({canvas: $('d3'), hud: HUD, send: tx, norender: NORENDER, view: () => VIEW});
     if(lastDrv) DRV.drv(lastDrv);
     if(VAN) DRV.info(VAN);
     drvLoading = false;
@@ -581,7 +610,7 @@ function onFx(d){
   else if(d.k === 'gooned') buzz([100, 50, 100]);
   else if(d.k === 'powder' || d.k === 'boom') buzz([30, 20, 30, 20, 200]);
   else if(d.k === 'load') buzz(30);
-  if(d.k === 'land' && cur === 'toss'){ tossFlash = {t: performance.now(), how: d.how, pay: d.pay}; }
+  if(d.k === 'land' && cur === 'toss'){ tossFlash = {t: performance.now(), how: d.how, pay: d.pay}; sound(d.how); }
   if(d.k === 'nothing' && cur === 'toss'){ tossFlash = {t: performance.now(), how: 'none'}; }
 }
 
@@ -648,7 +677,7 @@ function drawToss(){
     const speed = L / Math.max(60, dt);   // px per ms
     const pow = Math.max(0.1, Math.min(1, L / (Math.min(c.clientWidth, c.clientHeight) * 0.75) * 0.6 + speed * 0.25));
     act({a: 'toss', ang: Math.atan2(Math.sin(ang), Math.cos(ang)), pow});
-    buzz(15);
+    buzz(15); sound('toss');
   };
   c.addEventListener('pointerup', end); c.addEventListener('pointercancel', () => { swipe = null; trail = []; });
   setInterval(() => { if(cur === 'toss') drawToss(); }, 50);
@@ -702,13 +731,42 @@ function chips(el, r){
   const c1 = document.createElement('span'); c1.className = 'chip'; c1.textContent = w.name + ' wrap'; el.appendChild(c1);
   const c2 = document.createElement('span'); c2.className = 'chip'; c2.textContent = rb.name + ' ribbon'; el.appendChild(c2);
 }
-let benchBuilt = null;
+/* ---------------- the bench: arranging by hand ----------------
+   Arrange mode: drag a flower from the tray onto the bouquet, drag one
+   that is there to move it, drag it off the bouquet to take it out.
+   Easy mode (for little ones): tap a flower in the tray and it goes in
+   wherever looks right. The TV keeps where everything was put, so the
+   bouquet in the cooler (and on the porch) is the one that was made. */
+let benchBuilt = null, benchMode = recall('wats_arrmode') || 'arrange';
+let localPos = null, localUntil = 0, drag = null, benchOrder = null;
+function lastStem(o){ const have = (o[12] || '').split(',').map(Number); for(let i = have.length - 1; i >= 0; i--) if(have[i] > 0) return i; return -1; }
+function setMode(m){
+  benchMode = m; store('wats_arrmode', m);
+  $('aModeArr').classList.toggle('sel', m === 'arrange'); $('aModeTap').classList.toggle('sel', m === 'tap');
+  $('aHint').textContent = m === 'arrange' ? 'Drag flowers onto the bouquet. Drag one off to take it out.' : 'Tap a flower to put it in.';
+}
+function vaseBox(){
+  const c = $('vase'), W = c.clientWidth, Hh = c.clientHeight;
+  const S = Math.min(W * 0.92, Hh / 1.3);
+  return {S, x0: (W - S) / 2, y0: (Hh - S * 1.3) / 2 + 4, W, Hh};
+}
+function sizeVase(){
+  const c = $('vase'), dpr = Math.min(2, devicePixelRatio || 1);
+  const W = c.clientWidth; if(W < 10) return;
+  const Hh = Math.round(Math.min(W * 1.05, innerHeight * 0.5));
+  c.style.height = Hh + 'px';
+  if(c.width !== Math.round(W * dpr) || c.height !== Math.round(Hh * dpr)){ c.width = Math.round(W * dpr); c.height = Math.round(Hh * dpr); }
+  c._dpr = dpr;
+}
 function renderBench(o){
+  benchOrder = o;
   const r = recipesFor(SNAP.hol)[o[3]];
   const have = (o[12] || '').split(',').map(Number);
   const wrap = o[13], rib = o[14];
+  if(!localPos || performance.now() > localUntil) localPos = (o[15] || []).map(q => q.slice());
   if(benchBuilt !== o[0]){
     benchBuilt = o[0];
+    localPos = (o[15] || []).map(q => q.slice());
     const card = $('aCard'); card.innerHTML = '<b></b><div class="who"></div><div class="chips"></div><img class="pic">';
     card.querySelector('.pic').src = bouquetURL(o[3]);
     card.querySelector('b').textContent = r.name;
@@ -717,20 +775,26 @@ function renderBench(o){
     $('aStems').innerHTML = '';
     F.forEach((f, i) => {
       const b = document.createElement('button'); b.className = 'stem'; b.dataset.i = i;
-      b.innerHTML = '<img><span class="n"></span><span class="s small"></span>';
+      b.innerHTML = '<img draggable="false"><span class="n"></span><span class="s small"></span>';
       b.querySelector('img').src = 'flowers/' + f.k + '.png'; b.querySelector('.n').textContent = f.name;
-      b.onclick = () => { act({a: 'stem', o: o[0], f: i, d: 1}); buzz(8); };
-      b.oncontextmenu = e => { e.preventDefault(); act({a: 'stem', o: o[0], f: i, d: -1}); };
+      b.addEventListener('pointerdown', e => {
+        if(benchMode === 'tap') return;
+        e.preventDefault();
+        startDrag(e, {from: 'bin', f: i});
+      });
+      b.onclick = () => { if(benchMode !== 'tap') return; addStem(i, null, null); };
       $('aStems').appendChild(b);
     });
     const minus = document.createElement('button'); minus.className = 'stem'; minus.innerHTML = '<span style="font-size:22px">−</span><span>Take one out</span>';
-    minus.onclick = () => { const last = lastStem(o); if(last >= 0) act({a: 'stem', o: o[0], f: last, d: -1}); };
+    minus.onclick = () => { const p = localPos || []; if(!p.length) return; const q = p[p.length - 1]; removeStem(p.length - 1, q[0]); };
     $('aStems').appendChild(minus);
     $('aWrap').innerHTML = ''; $('aRib').innerHTML = '';
-    SIM.WRAPS.forEach(w => { const b = document.createElement('button'); b.textContent = w.name; b.style.background = w.c; b.style.color = '#222'; b.dataset.k = w.k; b.onclick = () => act({a: 'wrap', o: o[0], k: w.k}); $('aWrap').appendChild(b); });
-    SIM.RIBBONS.forEach(w => { const b = document.createElement('button'); b.textContent = w.name; b.style.background = w.c; b.style.color = '#222'; b.dataset.k = w.k; b.onclick = () => act({a: 'ribbon', o: o[0], k: w.k}); $('aRib').appendChild(b); });
-    $('aDone').onclick = () => { act({a: 'done', o: o[0]}); buzz([20, 30, 40]); };
-    $('aDrop').onclick = () => act({a: 'drop', o: o[0]});
+    SIM.WRAPS.forEach(w => { const b = document.createElement('button'); b.textContent = w.name; b.style.background = w.c; b.style.color = '#222'; b.dataset.k = w.k; b.onclick = () => { act({a: 'wrap', o: benchOrder[0], k: w.k}); sound('click'); }; $('aWrap').appendChild(b); });
+    SIM.RIBBONS.forEach(w => { const b = document.createElement('button'); b.textContent = w.name; b.style.background = w.c; b.style.color = '#222'; b.dataset.k = w.k; b.onclick = () => { act({a: 'ribbon', o: benchOrder[0], k: w.k}); sound('click'); }; $('aRib').appendChild(b); });
+    $('aDone').onclick = () => { act({a: 'done', o: benchOrder[0]}); buzz([20, 30, 40]); sound('done'); };
+    $('aDrop').onclick = () => act({a: 'drop', o: benchOrder[0]});
+    setMode(benchMode);
+    $('bench').scrollTop = 0;
   }
   [...$('aStems').children].forEach(b => {
     if(b.dataset.i == null) return;
@@ -741,55 +805,235 @@ function renderBench(o){
   });
   [...$('aWrap').children].forEach(b => b.classList.toggle('sel', b.dataset.k === wrap));
   [...$('aRib').children].forEach(b => b.classList.toggle('sel', b.dataset.k === rib));
-  drawVase(have, wrap, rib, o[0]);
+  drawVase();
 }
-let stemOrder = [];
-function lastStem(o){ const have = (o[12] || '').split(',').map(Number); for(let i = have.length - 1; i >= 0; i--) if(have[i] > 0) return i; return -1; }
-function drawVase(have, wrap, rib, id){
-  const c = $('vase'), g = c.getContext('2d');
-  g.clearRect(0, 0, 600, 420);
-  const n = have.reduce((a, b) => a + (b || 0), 0);
-  // the bouquet as it is now, from the real flowers, in the middle of the bench
-  WBouquet.draw(g, 300 - 160, 4, 320, {st: have, wrap: wrap || null, rib: rib || null, seed: id});
-  if(!n){ g.fillStyle = 'rgba(255,255,255,0.75)'; g.font = 'bold 24px system-ui'; g.textAlign = 'center'; g.fillText('Tap the flowers the card asks for', 300, 150); }
+function addStem(i, x, y){
+  const r = (Math.random() - 0.5) * 0.5;
+  act({a: 'stem', o: benchOrder[0], f: i, d: 1, x, y, r});
+  (localPos = localPos || []).push([i, x, y, r]); localUntil = performance.now() + 450;
+  buzz(8); sound('stem'); drawVase();
 }
+function removeStem(idx, f){
+  act({a: 'stem', o: benchOrder[0], f, d: -1, idx});
+  if(localPos) localPos.splice(idx, 1); localUntil = performance.now() + 450;
+  buzz(12); sound('click'); drawVase();
+}
+function drawVase(){
+  const o = benchOrder; if(!o) return;
+  sizeVase();
+  const c = $('vase'), g = c.getContext('2d'), dpr = c._dpr || 1, B = vaseBox();
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, B.W, B.Hh);
+  const pos = (localPos || []).filter((q, i) => !(drag && drag.from === 'placed' && drag.idx === i));
+  const st = F.map(() => 0); pos.forEach(q => st[q[0]]++);
+  // the auto-placed ones (easy mode) still count from the server's numbers
+  WBouquet.draw(g, B.x0, B.y0, B.S, {st, pos, wrap: o[13] || null, rib: o[14] || null, seed: o[0]});
+  if(!pos.length){ g.fillStyle = 'rgba(255,255,255,0.8)'; g.font = 'bold 17px system-ui'; g.textAlign = 'center';
+    g.fillText(benchMode === 'tap' ? 'Tap the flowers the card asks for' : 'Drag the flowers up here', B.W / 2, B.y0 + B.S * 0.4); }
+  if(drag && drag.over){ g.strokeStyle = 'rgba(242,197,49,0.8)'; g.setLineDash([8, 6]); g.lineWidth = 3; g.strokeRect(B.x0 + 4, B.y0 + 4, B.S - 8, B.S * 0.85); g.setLineDash([]); }
+}
+/* a flower under the finger, for picking one back up */
+function placedAt(px, py){
+  const B = vaseBox(), pos = localPos || [];
+  for(let i = pos.length - 1; i >= 0; i--){
+    const q = pos[i]; if(q[1] === null) continue;
+    const k = WBouquet.KEYS[q[0]];
+    const cx = B.x0 + q[1] * B.S, cy = B.y0 + q[2] * B.S, rr = q[0] === 6 ? B.S * 0.12 : B.S * (WBouquet.SIZE[k] || 0.2) * 0.65;
+    if(Math.hypot(px - cx, py - cy) < rr) return i;
+  }
+  return -1;
+}
+function startDrag(e, d){
+  drag = Object.assign(d, {id: e.pointerId, over: false});
+  const im = $('dragImg');
+  im.src = 'flowers/' + F[d.f].k + '.png';
+  im.style.display = 'block';
+  moveDrag(e.clientX, e.clientY);
+  try { e.target.setPointerCapture(e.pointerId); } catch(err){}
+}
+function moveDrag(x, y){
+  if(!drag) return;
+  const im = $('dragImg'), sz = 84;
+  im.style.width = sz + 'px'; im.style.height = sz + 'px'; im.style.left = (x - sz / 2) + 'px'; im.style.top = (y - sz * 0.7) + 'px';
+  const r = $('vase').getBoundingClientRect(), B = vaseBox();
+  const lx = x - r.left, ly = y - r.top - 20;
+  drag.lx = lx; drag.ly = ly;
+  const was = drag.over;
+  drag.over = lx > B.x0 && lx < B.x0 + B.S && ly > B.y0 - 10 && ly < B.y0 + B.S * 0.95;
+  if(was !== drag.over) drawVase();
+}
+function endDrag(){
+  if(!drag) return;
+  const d = drag; drag = null;
+  $('dragImg').style.display = 'none';
+  const B = vaseBox();
+  const nx = Math.max(0.05, Math.min(0.95, (d.lx - B.x0) / B.S)), ny = Math.max(0.03, Math.min(0.9, (d.ly - B.y0) / B.S));
+  if(d.from === 'bin'){ if(d.over) addStem(d.f, nx, ny); }
+  else if(d.from === 'placed'){
+    if(d.over){ act({a: 'move', o: benchOrder[0], idx: d.idx, x: nx, y: ny}); if(localPos && localPos[d.idx]){ localPos[d.idx][1] = nx; localPos[d.idx][2] = ny; } localUntil = performance.now() + 450; sound('stem'); }
+    else removeStem(d.idx, d.f);
+  }
+  drawVase();
+}
+(function(){
+  const c = $('vase');
+  c.addEventListener('pointerdown', e => {
+    const r = c.getBoundingClientRect(), i = placedAt(e.clientX - r.left, e.clientY - r.top);
+    if(i < 0) return;
+    e.preventDefault();
+    startDrag(e, {from: 'placed', idx: i, f: localPos[i][0]});
+    drawVase();
+  });
+  addEventListener('pointermove', e => { if(drag && e.pointerId === drag.id){ e.preventDefault(); moveDrag(e.clientX, e.clientY); } }, {passive: false});
+  addEventListener('pointerup', e => { if(drag && e.pointerId === drag.id) endDrag(); });
+  addEventListener('pointercancel', e => { if(drag && e.pointerId === drag.id){ drag = null; $('dragImg').style.display = 'none'; drawVase(); } });
+  $('aModeArr').onclick = () => setMode('arrange');
+  $('aModeTap').onclick = () => setMode('tap');
+  addEventListener('resize', () => { if(cur === 'arrange') drawVase(); });
+})();
 
-/* ---------------- the garden ---------------- */
-let plotsBuilt = false;
+/* ---------------- the garden: a field to walk around ----------------
+   Small (12 plots) fits on one screen. Big (24) and Huge (36) are a
+   field bigger than the phone: drag to look around, and the arrows at
+   the edges point at plants that are thirsty or ready to cut. Tap a
+   plant to water it, tap one in full bloom to cut it. The size is the
+   garden's own, shared by everybody growing. */
+const GARDEN = {camX: 0, camY: 0, vx: 0, vy: 0, down: null, fx: [], last: performance.now()};
+function gardenGeom(){
+  const c = $('gcan'), W = c.clientWidth, Hh = c.clientHeight;
+  const n = SNAP && SNAP.gar ? SNAP.gar.length : 12;
+  const cols = n === 12 ? 3 : 6, rows = Math.ceil(n / cols);
+  const cell = n === 12 ? Math.floor(Math.min(W / cols, Hh / rows)) : 150;
+  const FW = cols * cell, FH = rows * cell;
+  return {W, Hh, n, cols, rows, cell, FW, FH, ox: n === 12 ? (W - FW) / 2 : 0, oy: n === 12 ? (Hh - FH) / 2 : 0, scroll: n !== 12};
+}
+function clampCam(G2){
+  GARDEN.camX = Math.max(0, Math.min(Math.max(0, G2.FW - G2.W), GARDEN.camX));
+  GARDEN.camY = Math.max(0, Math.min(Math.max(0, G2.FH - G2.Hh), GARDEN.camY));
+}
+function plotXY(G2, i){
+  const cx = (i % G2.cols) * G2.cell, cy = Math.floor(i / G2.cols) * G2.cell;
+  return {x: G2.ox + cx - (G2.scroll ? GARDEN.camX : 0), y: G2.oy + cy - (G2.scroll ? GARDEN.camY : 0)};
+}
 function renderGarden(){
   const s = SNAP;
   $('gTemp').textContent = s.tmp + '°F';
   $('gTemp').style.color = s.tmp > 108 ? '#ff6a4a' : s.tmp > 98 ? '#ffb23a' : '#ffe08a';
-  if(!s.gar) return;
-  if(!plotsBuilt){
-    plotsBuilt = true;
-    $('plots').innerHTML = '';
-    s.gar.forEach((p, i) => {
-      const d = document.createElement('div'); d.className = 'plot';
-      d.innerHTML = '<canvas width="200" height="200"></canvas><div class="lab"></div>';
-      d.onclick = () => {
-        const q = SNAP.gar[i];
-        if(q[2] >= 100){ act({a: 'harvest', i}); buzz([20, 20, 40]); } else { act({a: 'water', i}); buzz(10); }
-      };
-      $('plots').appendChild(d);
+  [...document.querySelectorAll('#gsize button')].forEach(b => b.classList.toggle('sel', +b.dataset.n === (s.gn || 12)));
+}
+function drawGarden(){
+  const c = $('gcan'), dpr = c._dpr || 1, g = c.getContext('2d');
+  if(!SNAP || !SNAP.gar){ g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, c.width, c.height); return; }
+  const G2 = gardenGeom();
+  const now = performance.now(), dt = Math.min(0.05, (now - GARDEN.last) / 1000); GARDEN.last = now;
+  // glide after a flick
+  if(!GARDEN.down && G2.scroll){ GARDEN.camX += GARDEN.vx * dt; GARDEN.camY += GARDEN.vy * dt; GARDEN.vx *= 0.9; GARDEN.vy *= 0.9; }
+  clampCam(G2);
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  // the dirt, with furrows that move as you walk
+  g.fillStyle = '#7a5434'; g.fillRect(0, 0, G2.W, G2.Hh);
+  g.strokeStyle = 'rgba(0,0,0,0.12)'; g.lineWidth = 3;
+  const fo = G2.scroll ? -GARDEN.camY % 22 : 0;
+  for(let y = fo; y < G2.Hh; y += 22){ g.beginPath(); g.moveTo(0, y); g.lineTo(G2.W, y + 4); g.stroke(); }
+  const t = now / 1000, heat = Math.max(0, Math.min(1, (SNAP.tmp - 70) / 47));
+  SNAP.gar.forEach((p, i) => {
+    const {x, y} = plotXY(G2, i), C = G2.cell;
+    if(x > G2.W || y > G2.Hh || x + C < 0 || y + C < 0) return;
+    const f = F[p[0]], water = p[1], grow = p[2];
+    // the bed: darker when wet, cracked when dry
+    const pad = C * 0.06;
+    g.fillStyle = water > 25 ? 'rgb(' + (70 - water * 0.2) + ',' + (45 - water * 0.12) + ',28)' : '#a8845a';
+    roundRectC(g, x + pad, y + pad, C - 2 * pad, C - 2 * pad, C * 0.12); g.fill();
+    if(water < 25){ g.strokeStyle = 'rgba(60,40,20,0.6)'; g.lineWidth = 1.5; for(let k = 0; k < 4; k++){ g.beginPath(); g.moveTo(x + C * (0.2 + k * 0.18), y + C * 0.75); g.lineTo(x + C * (0.28 + k * 0.17), y + C * 0.86); g.lineTo(x + C * (0.24 + k * 0.18), y + C * 0.93); g.stroke(); } }
+    // the plant: a stem and leaves, the real flower opening as it grows
+    const droop = water <= 0 ? 0.5 : water < 15 ? 0.25 : 0;
+    const baseX = x + C / 2, baseY = y + C * 0.9, hgt = C * (0.2 + grow / 100 * 0.45);
+    const topX = baseX + droop * C * 0.25, topY = baseY - hgt + droop * C * 0.12;
+    g.strokeStyle = water > 0 ? '#3d8a26' : '#8a7a3a'; g.lineWidth = Math.max(2, C * 0.035);
+    g.beginPath(); g.moveTo(baseX, baseY); g.quadraticCurveTo(baseX, baseY - hgt * 0.6, topX, topY); g.stroke();
+    g.fillStyle = water > 0 ? '#4f9a33' : '#9a8a4a';
+    [[-1, 0.35], [1, 0.55]].forEach(([sd, h]) => { g.beginPath(); g.ellipse(baseX + sd * C * 0.08, baseY - hgt * h, C * 0.08, C * 0.035, sd * 0.6, 0, Math.PI * 2); g.fill(); });
+    const im = WBouquet.img[f.k];
+    if(grow > 30 && im && im.complete && im.naturalWidth){
+      const sz = C * (0.18 + (grow - 30) / 70 * 0.5);
+      g.save(); g.translate(topX, topY); g.rotate(droop * 0.9 + Math.sin(t * 1.5 + i) * 0.04);
+      if(water <= 0) g.filter = 'grayscale(70%) brightness(0.85)';
+      g.drawImage(im, -sz / 2, -sz * 0.75, sz, sz * im.naturalHeight / im.naturalWidth);
+      g.restore();
+    } else { g.fillStyle = '#5faa3a'; g.beginPath(); g.ellipse(topX, topY, C * 0.05, C * 0.08, 0, 0, Math.PI * 2); g.fill(); }
+    // ready to cut: a gold ring that pulses
+    if(grow >= 100){ g.strokeStyle = 'rgba(255,210,63,' + (0.6 + 0.4 * Math.sin(t * 6)) + ')'; g.lineWidth = 4; roundRectC(g, x + pad, y + pad, C - 2 * pad, C - 2 * pad, C * 0.12); g.stroke();
+      label(g, 'CUT', x + C - pad - 4, y + pad + 4, '#ffd23f', 'right'); }
+    // water left
+    g.fillStyle = 'rgba(0,0,0,0.4)'; g.fillRect(x + pad * 2, y + C - pad * 2.4, C - pad * 4, 5);
+    g.fillStyle = water > 25 ? '#4ab0ff' : '#ff6a4a'; g.fillRect(x + pad * 2, y + C - pad * 2.4, (C - pad * 4) * water / 100, 5);
+    if(water < 25 && Math.floor(t * 3) % 2) drop(g, x + pad + 14, y + pad + 16, 9, '#4ab0ff');
+    label(g, f.name, x + pad + 4, y + pad + 4, '#fff', 'left', water < 25 ? 'Thirsty!' : '');
+  });
+  // the sun beating down
+  if(heat > 0.5){ g.fillStyle = 'rgba(255,140,40,' + ((heat - 0.5) * 0.2) + ')'; g.fillRect(0, 0, G2.W, G2.Hh); }
+  // what just happened
+  for(let k = GARDEN.fx.length - 1; k >= 0; k--){
+    const e = GARDEN.fx[k]; e.t += dt;
+    if(e.t > 1){ GARDEN.fx.splice(k, 1); continue; }
+    const {x, y} = plotXY(G2, e.i), C = G2.cell;
+    if(e.k === 'water') for(let d = 0; d < 10; d++){ drop(g, x + C * (0.2 + (d % 5) * 0.15), y + C * 0.15 + ((e.t * 220 + d * 23) % (C * 0.7)), 4, 'rgba(120,200,255,' + (1 - e.t) + ')'); }
+    else { const im = WBouquet.img[F[e.f].k]; g.globalAlpha = 1 - e.t; if(im) g.drawImage(im, x + C * 0.25, y + C * 0.3 - e.t * C, C * 0.5, C * 0.5); label(g, '+5', x + C * 0.5, y + C * 0.2 - e.t * C * 0.6, '#ffd23f', 'center'); g.globalAlpha = 1; }
+  }
+  // arrows at the edges for plants off the screen that need you
+  if(G2.scroll){
+    SNAP.gar.forEach((p, i) => {
+      const need = p[2] >= 100 ? 'cut' : p[1] < 25 ? 'water' : null; if(!need) return;
+      const {x, y} = plotXY(G2, i), C = G2.cell, cx = x + C / 2, cy = y + C / 2;
+      if(cx > 0 && cx < G2.W && cy > 0 && cy < G2.Hh) return;
+      const ex = Math.max(18, Math.min(G2.W - 18, cx)), ey = Math.max(18, Math.min(G2.Hh - 18, cy));
+      const a = Math.atan2(cy - ey, cx - ex);
+      g.save(); g.translate(ex, ey); g.rotate(a);
+      g.fillStyle = need === 'cut' ? '#ffd23f' : '#4ab0ff'; g.beginPath(); g.moveTo(14, 0); g.lineTo(-8, -10); g.lineTo(-8, 10); g.closePath(); g.fill();
+      g.restore();
     });
   }
-  [...$('plots').children].forEach((d, i) => {
-    const p = s.gar[i], f = F[p[0]], water = p[1], grow = p[2];
-    const c = d.querySelector('canvas'), g = c.getContext('2d');
-    g.clearRect(0, 0, 200, 200);
-    g.fillStyle = water > 25 ? '#5b3a22' : '#a07a4a'; g.fillRect(0, 0, 200, 200);
-    // the plant: taller as it grows, droopy when dry
-    const hgt = 30 + grow * 1.1, droop = water < 20 ? 0.6 : 0;
-    g.strokeStyle = water > 0 ? '#3d8a26' : '#8a7a3a'; g.lineWidth = 8;
-    g.beginPath(); g.moveTo(100, 190); g.quadraticCurveTo(100 + droop * 40, 190 - hgt, 100 + droop * 70, 190 - hgt + droop * 40); g.stroke();
-    if(grow > 40){ g.fillStyle = f.c; const r = 8 + grow * 0.22; g.beginPath(); g.arc(100 + droop * 70, 190 - hgt + droop * 40, r, 0, Math.PI * 2); g.fill(); g.fillStyle = f.c2; g.beginPath(); g.arc(100 + droop * 70, 190 - hgt + droop * 40, r * 0.35, 0, Math.PI * 2); g.fill(); }
-    g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(8, 8, 184, 16);
-    g.fillStyle = water > 25 ? '#4ab0ff' : '#ff6a4a'; g.fillRect(8, 8, 184 * water / 100, 16);
-    if(grow >= 100){ g.strokeStyle = '#ffd23f'; g.lineWidth = 10; g.strokeRect(5, 5, 190, 190); }
-    d.querySelector('.lab').textContent = grow >= 100 ? 'CUT ME! ' + f.name : water < 25 ? 'Thirsty! ' + f.name : f.name;
-  });
 }
+function roundRectC(g, x, y, w, h, r){ g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
+function drop(g, x, y, r, col){ g.fillStyle = col; g.beginPath(); g.moveTo(x, y - r * 1.4); g.quadraticCurveTo(x + r, y, x, y + r); g.quadraticCurveTo(x - r, y, x, y - r * 1.4); g.fill(); }
+function label(g, t, x, y, col, al, extra){
+  g.font = 'bold 12px system-ui'; g.textAlign = al || 'left'; g.textBaseline = 'top';
+  g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,0.7)'; g.strokeText(t, x, y); g.fillStyle = col; g.fillText(t, x, y);
+  if(extra){ g.strokeText(extra, x, y + 14); g.fillStyle = '#ff9a8a'; g.fillText(extra, x, y + 14); }
+}
+(function(){
+  const c = $('gcan');
+  c.addEventListener('pointerdown', e => { GARDEN.down = {x: e.clientX, y: e.clientY, cx: GARDEN.camX, cy: GARDEN.camY, t: performance.now(), moved: 0, lx: e.clientX, ly: e.clientY}; GARDEN.vx = GARDEN.vy = 0; c.setPointerCapture(e.pointerId); });
+  c.addEventListener('pointermove', e => {
+    const d = GARDEN.down; if(!d) return;
+    const G2 = gardenGeom();
+    d.moved = Math.max(d.moved, Math.hypot(e.clientX - d.x, e.clientY - d.y));
+    if(G2.scroll && d.moved > 6){
+      GARDEN.vx = -(e.clientX - d.lx) * 30; GARDEN.vy = -(e.clientY - d.ly) * 30;
+      GARDEN.camX = d.cx - (e.clientX - d.x); GARDEN.camY = d.cy - (e.clientY - d.y);
+    }
+    d.lx = e.clientX; d.ly = e.clientY;
+  });
+  const up = e => {
+    const d = GARDEN.down; GARDEN.down = null; if(!d) return;
+    if(d.moved > 8 || !SNAP || !SNAP.gar) return;
+    // a tap: which plant?
+    const r = c.getBoundingClientRect(), G2 = gardenGeom(), px = e.clientX - r.left, py = e.clientY - r.top;
+    for(let i = 0; i < SNAP.gar.length; i++){
+      const {x, y} = plotXY(G2, i);
+      if(px >= x && px < x + G2.cell && py >= y && py < y + G2.cell){
+        const q = SNAP.gar[i];
+        if(q[2] >= 100){ act({a: 'harvest', i}); buzz([20, 20, 40]); sound('harvest'); GARDEN.fx.push({k: 'cut', i, f: q[0], t: 0}); }
+        else { act({a: 'water', i}); buzz(10); sound('water'); GARDEN.fx.push({k: 'water', i, t: 0}); }
+        break;
+      }
+    }
+  };
+  c.addEventListener('pointerup', up);
+  c.addEventListener('pointercancel', () => { GARDEN.down = null; });
+  document.querySelectorAll('#gsize button').forEach(b => b.onclick = () => { act({a: 'gsize', n: +b.dataset.n}); sound('click'); GARDEN.camX = GARDEN.camY = 0; });
+  (function loop(){ requestAnimationFrame(loop); if(cur === 'grow') drawGarden(); })();
+})();
 
 /* ---------------- dispatch ---------------- */
 let MAP = null, sel = -1, goonMode = false, holdT = null;
@@ -837,7 +1081,7 @@ function drawDispatch(){
   c.addEventListener('pointerdown', e => {
     const x0 = e.offsetX, y0 = e.offsetY;
     clearTimeout(holdT);
-    holdT = setTimeout(() => { holdT = null; const {sc, ox, oy} = mapView(); act({a: 'ping', x: (x0 - ox) / sc, z: (y0 - oy) / sc, kind: 'look'}); buzz(40); }, 550);
+    holdT = setTimeout(() => { holdT = null; const {sc, ox, oy} = mapView(); act({a: 'ping', x: (x0 - ox) / sc, z: (y0 - oy) / sc, kind: 'look'}); buzz(40); sound('ping'); }, 550);
     c._down = {x: x0, y: y0};
   });
   c.addEventListener('pointerup', e => {
@@ -854,7 +1098,7 @@ function drawDispatch(){
     if(sel >= 0){
       let bo = null; bd = 18 / sc;
       SNAP.ord.forEach(o => { if(o[1] || o[4] < 0 || o[2] > 3) return; const h = MAP.houses[o[4]]; const d = Math.hypot(h.x - wx, h.z - wz); if(d < bd){ bd = d; bo = o; } });
-      if(bo){ act({a: 'assign', o: bo[0], v: sel}); buzz([15, 30, 15]); sel = -1; }
+      if(bo){ act({a: 'assign', o: bo[0], v: sel}); buzz([15, 30, 15]); sound('ping'); sel = -1; }
     }
   });
   c.addEventListener('pointercancel', () => { clearTimeout(holdT); holdT = null; });
@@ -909,7 +1153,7 @@ function cartTick(){
     const p = CART.people.find(p => p.want && !p.happy && Math.abs(p.x - x) < 26 && Math.abs(p.y - 25 - y) < 40);
     if(p){
       if(CART.flash < 0) return;
-      if(Math.abs(p.x - cx) < W * 0.35){ p.happy = 1; CART.sold++; act({a: 'rose'}); buzz(15); }
+      if(Math.abs(p.x - cx) < W * 0.35){ p.happy = 1; CART.sold++; act({a: 'rose'}); buzz(15); sound('cash'); }
       else { buzz(5); }
       return;
     }
@@ -948,7 +1192,7 @@ function paradeDraw(){
     // the float heads down Gilbert Road (south): its right hand is the screen's left... keep it simple: left is left
     const ang = dx > 0 ? -Math.PI / 2 : Math.PI / 2;
     const pow = Math.max(0.15, Math.min(1, L / (c.clientWidth * 0.6)));
-    act({a: 'ptoss', ang, pow}); buzz(12);
+    act({a: 'ptoss', ang, pow}); buzz(12); sound('toss');
   });
   setInterval(() => { if(cur === 'parade') paradeDraw(); }, 33);
 })();
@@ -979,7 +1223,7 @@ $('rNext').onclick = () => { tx({t: 'next'}); buzz(15); };
 
 /* ---------------- canvases follow the screen ---------------- */
 function resizeCanvases(){
-  ['tcan', 'dmap', 'ccan', 'pcan'].forEach(id => {
+  ['tcan', 'dmap', 'ccan', 'pcan', 'gcan'].forEach(id => {
     const c = $(id), r = c.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio || 1);
     if(r.width < 2) return;
     c.width = Math.round(r.width * dpr); c.height = Math.round(r.height * dpr); c._dpr = dpr;

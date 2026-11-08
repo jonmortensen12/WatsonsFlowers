@@ -63,15 +63,30 @@ function place(v, x, z, h, sp){ v.x = x; v.z = z; v.h = h; v.vx = Math.cos(h) * 
 {
   const S = testVan(2), v = S.vans[0];
   const h = M.houses.find(q => q.side === 'n' && M.canalDist(q.x, q.z) > 40);
-  place(v, h.x, h.z - 26, Math.PI / 2, 30); v.ghost = 0;
+  place(v, h.x, h.z - 9, Math.PI / 2, 32); v.ghost = 0;   // in the back yard, past the block wall
   let crashed = false, respawned = false;
   for(let i = 0; i < 60 * 5; i++){
     WSim.input(S, 0, {st: 0, gas: 1}); WSim.step(S);
     if(S.ev.some(e => e.k === 'crash')) crashed = true;
     if(S.ev.some(e => e.k === 'respawn')) respawned = true;
   }
-  ok(crashed, 'driving into a house at 67 mph is a crash');
+  ok(crashed, 'driving into a house at 72 mph is a crash');
   ok(respawned && !v.crash, 'and the van comes back on a road');
+}
+
+/* a block wall goes over, and a gentle bump only dents */
+{
+  const S = testVan(3), v = S.vans[0];
+  const w = M.walls.find(b => (b.x1 - b.x0) > (b.z1 - b.z0) && M.canalDist(b.x0, b.z0) > 40);
+  const cx = (w.x0 + w.x1) / 2;
+  place(v, cx, w.z0 - 12, Math.PI / 2, 20); v.ghost = 0; v.dmg = 0;
+  let down = false, crashed = false;
+  for(let i = 0; i < 60 && !down; i++){ S.cars.length = 0; WSim.input(S, 0, {st: 0}); WSim.step(S); if(S.ev.some(e => e.k === 'wall')) down = true; if(S.ev.some(e => e.k === 'crash')) crashed = true; }
+  ok(down && !crashed && v.spd < 18 && v.dmg > 0, 'a block wall goes over at 45 mph: no crash, slower (' + (v.spd * 2.237).toFixed(0) + ' mph), dented ' + Math.round(v.dmg * 100) + '%');
+  const h = M.houses.find(q => q.side === 'n' && M.canalDist(q.x, q.z) > 40);
+  place(v, h.x, h.z - 9, Math.PI / 2, 12); v.ghost = 0; v.dmg = 0; crashed = false;
+  for(let i = 0; i < 90; i++){ S.cars.length = 0; WSim.input(S, 0, {st: 0}); WSim.step(S); if(S.ev.some(e => e.k === 'crash')) crashed = true; }
+  ok(!crashed && v.dmg > 0.05, 'a house at 27 mph dents the van (' + Math.round(v.dmg * 100) + '%) but is not a crash');
 }
 
 /* a canal jump: up the ramp at speed and over */
@@ -102,8 +117,8 @@ function place(v, x, z, h, sp){ v.x = x; v.z = z; v.h = h; v.vx = Math.cos(h) * 
   o.state = 'van'; o.van = 0; tv.cargo.push(o.id);
   const L = WSim.local(M);
   const h = M.houses.find(q => q.side === 'n' && M.canalDist(q.x, q.z) > 40);
-  const v = WSim.localVan(L, h.x, h.z - 26, Math.PI / 2);
-  v.ghost = 0; v.vz = 30;
+  const v = WSim.localVan(L, h.x, h.z - 9, Math.PI / 2);   // in the back yard, past the wall
+  v.ghost = 0; v.vz = 32;
   let crashEv = null;
   for(let i = 0; i < 60 * 3 && !crashEv; i++){
     v.gas = 1; WSim.localStep(L);
