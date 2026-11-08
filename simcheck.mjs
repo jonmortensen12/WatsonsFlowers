@@ -106,7 +106,7 @@ function day(nVans, opts = {}){
   return {S, seen, ms: Date.now() - tStart, minStock, goonsAt, dustAt};
 }
 
-const runs = quick ? [[1, {dayLen: 150}]] : [[1, {}], [3, {}], [6, {}]];
+const runs = quick ? [[1, {dayLen: 260}]] : [[1, {}], [3, {}], [6, {}]];
 for(const [n, o] of runs){
   const r = day(n, o);
   const S = r.S, res = S.results;
