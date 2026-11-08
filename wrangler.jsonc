@@ -1,0 +1,23 @@
+{
+  "name": "watsons",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-01",
+
+  // A URL on the workers.dev subdomain, said outright (see Mission Control).
+  "workers_dev": true,
+
+  // Keep anything set in the dashboard when a push redeploys.
+  "keep_vars": true,
+
+  // Only web/ is uploaded - the check scripts, the OpenStreetMap download
+  // and the notes beside it stay in the repo and off the internet.
+  "assets": {
+    "directory": "web",
+    "binding": "ASSETS",
+    // /relay is not a file, so it has to reach worker.js
+    "run_worker_first": ["/relay"]
+  }
+
+  // Secrets, set in the dashboard and never written here:
+  //   TURN_KEY_ID, TURN_KEY_API_TOKEN - the relay (see worker.js). Optional.
+}
