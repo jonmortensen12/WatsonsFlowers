@@ -87,7 +87,7 @@
   .sw { width: 14px; height: 14px; border-radius: 50%; display: inline-block; border: 1px solid rgba(0,0,0,0.3); }
   #bench { display: none; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; touch-action: pan-y; -webkit-overflow-scrolling: touch; padding: 10px 12px 0; }
   #bench > * { flex: none; }
-  #vase { width: 100%; height: 300px; display: block; flex: none; touch-action: none; border-radius: 16px; background: radial-gradient(ellipse at 50% 40%, #4a2a30, #24120f); }
+  #vase { width: 100%; height: 300px; display: block; flex: none; touch-action: pan-y; border-radius: 16px; background: radial-gradient(ellipse at 50% 40%, #4a2a30, #24120f); }
   .mode { display: flex; gap: 6px; align-items: center; margin: 2px 0 6px; }
   .mode button { padding: 6px 10px; font-size: 13px; background: #3a2226; }
   .mode button.sel { background: var(--gold); color: #3a2a00; }
@@ -107,6 +107,7 @@
   .stems { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
   .stem { padding: 6px 2px; font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 1px; background: #3a2226; touch-action: none; }
   .stem img { width: 40px; height: 40px; object-fit: contain; }
+  #bench.tap .stem { touch-action: manipulation; }
   .stem.need { outline: 2px solid var(--gold); }
   .row2 { display: flex; gap: 6px; margin-top: 8px; }
   .row2 button { flex: 1; padding: 10px 4px; font-size: 13px; }
@@ -742,6 +743,7 @@ let localPos = null, localUntil = 0, drag = null, benchOrder = null;
 function lastStem(o){ const have = (o[12] || '').split(',').map(Number); for(let i = have.length - 1; i >= 0; i--) if(have[i] > 0) return i; return -1; }
 function setMode(m){
   benchMode = m; store('wats_arrmode', m);
+  $('bench').classList.toggle('tap', m === 'tap');
   $('aModeArr').classList.toggle('sel', m === 'arrange'); $('aModeTap').classList.toggle('sel', m === 'tap');
   $('aHint').textContent = m === 'arrange' ? 'Drag flowers onto the bouquet. Drag one off to take it out.' : 'Tap a flower to put it in.';
 }
@@ -753,7 +755,7 @@ function vaseBox(){
 function sizeVase(){
   const c = $('vase'), dpr = Math.min(2, devicePixelRatio || 1);
   const W = c.clientWidth; if(W < 10) return;
-  const Hh = Math.round(Math.min(W * 1.05, innerHeight * 0.5));
+  const Hh = Math.round(Math.min(W * 0.95, innerHeight * 0.44));
   c.style.height = Hh + 'px';
   if(c.width !== Math.round(W * dpr) || c.height !== Math.round(Hh * dpr)){ c.width = Math.round(W * dpr); c.height = Math.round(Hh * dpr); }
   c._dpr = dpr;
@@ -877,7 +879,13 @@ function endDrag(){
 }
 (function(){
   const c = $('vase');
+  // a finger on a flower picks it up; anywhere else on the bouquet scrolls the page
+  c.addEventListener('touchstart', e => {
+    const t = e.touches[0], r = c.getBoundingClientRect();
+    if(benchMode === 'arrange' && placedAt(t.clientX - r.left, t.clientY - r.top) >= 0) e.preventDefault();
+  }, {passive: false});
   c.addEventListener('pointerdown', e => {
+    if(benchMode !== 'arrange') return;
     const r = c.getBoundingClientRect(), i = placedAt(e.clientX - r.left, e.clientY - r.top);
     if(i < 0) return;
     e.preventDefault();

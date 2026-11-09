@@ -497,6 +497,10 @@ function feature(i, secs, why, color){
 const pendingEv = {};
 const LOOK = {crash: 1, carhit: 1, smash: 1, land: 1, toss: 1, boom: 1, goonhit: 1, splash: 1, mist: 1, thud: 1};
 function shareEvent(e){
+  if(e.k === 'goons' || e.k === 'haboob'){   // news every driver hears, wherever they are
+    Object.values(NET.people).forEach(p => { if(p.role === 'drive' && p.van >= 0) (pendingEv[p.id] || (pendingEv[p.id] = [])).push({k: e.k}); });
+    return;
+  }
   if(!LOOK[e.k] || e.x == null) return;
   Object.values(NET.people).forEach(p => {
     if(p.role !== 'drive' || p.van < 0) return;

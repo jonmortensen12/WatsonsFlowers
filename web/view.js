@@ -9,8 +9,9 @@
 import * as THREE from './lib/three.module.min.js';
 import {canvas as mkCanvas, tex} from './world.js';
 
-const CAR_COLORS = ['#c8312f', '#2f5fc8', '#e8e8e8', '#222222', '#9aa3ad', '#2f8a4c', '#d8b23a', '#6b3fa0', '#f2f2f2', '#8a2b2b'];
-const HOODIES = ['#2b2b2b', '#c43c3c', '#3c6fc4', '#3ca85a', '#e2a33a', '#8a4fc4'];
+// bright on purpose: a car has to be seen at 80 mph against tan desert and grey road
+const CAR_COLORS = ['#ff3b30', '#1e7bff', '#ffd60a', '#2fd158', '#ff8a00', '#b44dff', '#00d1c1', '#ff2d92', '#ffffff', '#4fc3ff'];
+const HOODIES = ['#ff2d55', '#ff8a00', '#2fe05a', '#00b7ff', '#ffd60a', '#c34dff'];
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _p = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1), _c = new THREE.Color(), _v3 = new THREE.Vector3();
 
 function roundRect(g, x, y, w, h, r){ g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
@@ -50,8 +51,8 @@ const wheelMat = new THREE.MeshLambertMaterial({color: '#1c1c1c'});
 function carGeo(kind){
   const parts = [];
   function bx(w, h, d, x, y, z, shade){ const g = new THREE.BoxGeometry(w, h, d).translate(x, y, z); const n = g.attributes.position.count; g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3).fill(shade), 3)); parts.push(g); }
-  if(kind === 'car'){ bx(4.6, 0.8, 1.9, 0, 0.75, 0, 1); bx(2.4, 0.7, 1.7, -0.2, 1.5, 0, 0.35); }
-  else if(kind === 'pickup'){ bx(5.4, 0.9, 2.0, 0, 0.85, 0, 1); bx(1.8, 0.8, 1.9, 0.9, 1.7, 0, 0.35); }
+  if(kind === 'car'){ bx(4.6, 0.8, 1.9, 0, 0.75, 0, 1.1); bx(2.4, 0.7, 1.7, -0.2, 1.5, 0, 0.55); }
+  else if(kind === 'pickup'){ bx(5.4, 0.9, 2.0, 0, 0.85, 0, 1.1); bx(1.8, 0.8, 1.9, 0.9, 1.7, 0, 0.55); }
   else if(kind === 'truck'){ bx(2, 2, 2.3, 2.6, 1.3, 0, 1); bx(5.3, 2.8, 2.5, -1.0, 1.9, 0, 1.25); }
   else { bx(11, 2.8, 2.6, 0, 1.8, 0, 1.15); bx(10.6, 0.8, 2.62, 0, 2.3, 0, 0.3); }
   [[1.5, 0.9], [1.5, -0.9], [-1.5, 0.9], [-1.5, -0.9]].forEach(([x, z]) => bx(0.8, 0.8, 0.3, x * (kind === 'bus' ? 3 : kind === 'truck' ? 1.6 : 1), 0.4, z * 1.05, 0.08));
@@ -63,6 +64,33 @@ function carGeo(kind){
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setIndex(idx);
   return g;
 }
+/* headlights, taillights and the pool of light on the road ahead: unlit,
+   added on top of the scene and not fogged, so they show through the dust */
+const LAMP = {car: [2.31, 0.75, 0.6, -2.31, 0.85], pickup: [2.71, 0.85, 0.65, -2.71, 0.95], truck: [3.61, 1.2, 0.75, -3.66, 1.0], bus: [5.51, 1.3, 0.95, -5.51, 1.6], van: [2.76, 0.95, 0.7, -2.76, 1.0]};
+function lampGeo(kind){
+  const [fx, fy, w, rx, ry] = LAMP[kind], parts = [];
+  function add(g, r, gr, b){ const n = g.attributes.position.count; const c = new Float32Array(n * 3); for(let i = 0; i < n; i++){ c[i * 3] = r; c[i * 3 + 1] = gr; c[i * 3 + 2] = b; } g.setAttribute('color', new THREE.BufferAttribute(c, 3)); g.deleteAttribute('uv'); parts.push(g); }
+  [w, -w].forEach(z => {
+    add(new THREE.BoxGeometry(0.12, 0.32, 0.5).translate(fx, fy, z), 1, 0.97, 0.8);
+    add(new THREE.SphereGeometry(0.45, 8, 6).scale(0.5, 1, 1).translate(fx + 0.15, fy, z), 0.55, 0.5, 0.3);   // the glow
+    add(new THREE.BoxGeometry(0.12, 0.26, 0.42).translate(rx, ry, z), 1, 0.08, 0.05);
+  });
+  // the beam on the road: bright at the bumper, fading to nothing
+  const L = 11, beam = new THREE.BufferGeometry();
+  const bp = [fx, 0.07, -w - 0.3, fx, 0.07, w + 0.3, fx + L, 0.07, w + 2.4, fx + L, 0.07, -w - 2.4];
+  beam.setAttribute('position', new THREE.Float32BufferAttribute(bp, 3));
+  beam.setAttribute('normal', new THREE.Float32BufferAttribute([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0], 3));
+  beam.setAttribute('color', new THREE.Float32BufferAttribute([0.3, 0.28, 0.18, 0.3, 0.28, 0.18, 0, 0, 0, 0, 0, 0], 3));
+  beam.setIndex([0, 2, 1, 0, 3, 2]);
+  parts.push(beam);
+  const geo = new THREE.BufferGeometry(); let n = 0; parts.forEach(g => n += g.attributes.position.count);
+  const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), idx = []; let o = 0;
+  parts.forEach(g => { pos.set(g.attributes.position.array, o * 3); col.set(g.attributes.color.array, o * 3);
+    if(g.index) for(let i = 0; i < g.index.count; i++) idx.push(g.index.array[i] + o); o += g.attributes.position.count; });
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.BufferAttribute(col, 3)); geo.setIndex(idx);
+  return geo;
+}
+const lampMat = new THREE.MeshBasicMaterial({vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide});
 export const KIND_INDEX = {car: 0, pickup: 1, truck: 2, bus: 3};
 const KINDS = ['car', 'pickup', 'truck', 'bus'];
 
@@ -82,6 +110,7 @@ export function createView(scene, M, opts){
     const hood = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.0, 2.05), white); hood.position.set(2.2, 0.95, 0); body.add(hood);
     const glass = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.9, 1.9), new THREE.MeshLambertMaterial({color: '#26323d'})); glass.position.set(1.66, 1.95, 0); glass.rotation.z = -0.35; body.add(glass);
     const stripe = new THREE.Mesh(new THREE.BoxGeometry(5.6, 0.12, 2.18), new THREE.MeshLambertMaterial({color})); stripe.position.set(0, 0.5, 0); body.add(stripe);
+    body.add(new THREE.Mesh(lampGeo('van'), lampMat));
     const wheels = [];
     [[1.85, 1.05], [1.85, -1.05], [-1.9, 1.05], [-1.9, -1.05]].forEach(([x, z]) => { const w = new THREE.Mesh(wheelGeo, wheelMat); w.position.set(x, 0.42, z); body.add(w); wheels.push(w); });
     const flame = new THREE.Mesh(new THREE.ConeGeometry(0.35, 2.2, 10).rotateZ(Math.PI / 2), new THREE.MeshBasicMaterial({color: '#7fd0ff', transparent: true, opacity: 0.85}));
@@ -158,9 +187,11 @@ export function createView(scene, M, opts){
 
   /* ---- traffic: cars = [{x,z,h,kind,color,wreck:{y,ax,ay,az}|null}] ---- */
   const traffic = {};
-  KINDS.forEach(k => { const im = new THREE.InstancedMesh(carGeo(k), new THREE.MeshLambertMaterial({vertexColors: true}), 160); im.count = 0; im.frustumCulled = false; scene.add(im); traffic[k] = im; });
+  const lamps = {};
+  KINDS.forEach(k => { const im = new THREE.InstancedMesh(carGeo(k), new THREE.MeshLambertMaterial({vertexColors: true, emissive: '#222222'}), 160); im.count = 0; im.frustumCulled = false; scene.add(im); traffic[k] = im;
+    const lm = new THREE.InstancedMesh(lampGeo(k), lampMat, 160); lm.count = 0; lm.frustumCulled = false; lm.renderOrder = 2; scene.add(lm); lamps[k] = lm; });
   V.traffic = function(cars){
-    const n = {car: 0, pickup: 0, truck: 0, bus: 0};
+    const n = {car: 0, pickup: 0, truck: 0, bus: 0}, nl = {car: 0, pickup: 0, truck: 0, bus: 0};
     cars.forEach(c => {
       const k = typeof c.kind === 'number' ? KINDS[c.kind] : c.kind, im = traffic[k]; if(!im) return;
       const i = n[k]++; if(i >= 160) return;
@@ -168,8 +199,10 @@ export function createView(scene, M, opts){
       else { _e.set(0, -c.h, 0); _p.set(c.x, 0, c.z); }
       _q.setFromEuler(_e); _s.set(1, 1, 1); _m.compose(_p, _q, _s);
       im.setMatrixAt(i, _m);
+      if(!c.wreck) lamps[k].setMatrixAt(nl[k]++, _m);   // a wreck's lights go out
       im.setColorAt(i, _c.set(k === 'bus' ? '#f2f2f2' : k === 'truck' ? '#ececec' : CAR_COLORS[c.color % CAR_COLORS.length]));
     });
+    KINDS.forEach(k => { lamps[k].count = Math.min(160, nl[k]); lamps[k].instanceMatrix.needsUpdate = true; });
     KINDS.forEach(k => { const im = traffic[k]; im.count = Math.min(160, n[k]); im.instanceMatrix.needsUpdate = true; if(im.instanceColor) im.instanceColor.needsUpdate = true; });
   };
 
@@ -184,7 +217,15 @@ export function createView(scene, M, opts){
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8), new THREE.MeshLambertMaterial({color: '#e2b48c'})); head.position.set(0.08, 1.95, 0); g.add(head);
     const hood = new THREE.Mesh(new THREE.SphereGeometry(0.23, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2), torso.material); hood.position.set(0.04, 1.97, 0); g.add(hood);
     const loot = new THREE.Sprite(new THREE.SpriteMaterial({map: bouquetTex(0), transparent: true})); loot.scale.set(0.8, 1.04, 1); loot.position.set(0.3, 1.6, 0.35); g.add(loot);
-    g.userData = {torso, loot};
+    // a marker over the head, seen from a block away and through the dust
+    const mk = mkCanvas(128, 128), mg = mk.getContext('2d');
+    mg.fillStyle = '#ff2d55'; mg.beginPath(); mg.moveTo(64, 120); mg.lineTo(14, 40); mg.arc(64, 44, 50, Math.PI, 0); mg.closePath(); mg.fill();
+    mg.lineWidth = 6; mg.strokeStyle = '#fff'; mg.stroke();
+    mg.fillStyle = '#fff'; mg.font = 'bold 64px system-ui, sans-serif'; mg.textAlign = 'center'; mg.textBaseline = 'middle'; mg.fillText('!', 64, 48);
+    const marker = new THREE.Sprite(new THREE.SpriteMaterial({map: tex(mk), transparent: true, fog: false, depthTest: false}));
+    marker.scale.set(1.3, 1.3, 1); marker.position.set(0, 3.4, 0); marker.renderOrder = 3; g.add(marker);
+    g.scale.setScalar(1.35);
+    g.userData = {torso, loot, marker};
     scene.add(g);
     return g;
   }
@@ -195,6 +236,8 @@ export function createView(scene, M, opts){
       g.visible = true;
       g.userData.torso.material.color.set(HOODIES[gn.color % HOODIES.length]);
       g.userData.loot.visible = !!gn.carry;
+      g.userData.marker.visible = gn.st !== 'flung' && gn.st !== 2;
+      g.userData.marker.position.y = 3.4 + Math.sin(t * 5 + i) * 0.25;
       if(gn.st === 'flung' || gn.st === 2){ g.position.set(gn.x, gn.y, gn.z); g.rotation.set(gn.spin, -gn.h, gn.spin * 0.7); }
       else { g.position.set(gn.x, M.height(gn.x, gn.z), gn.z); g.rotation.set(0, -gn.h, Math.sin(t * 6 + (gn.id || i)) * 0.06); }
     });

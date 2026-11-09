@@ -19,7 +19,7 @@ export function start(opts){
   const L = SIM.local(M);
   let v = null, myI = -1, phase = 'lobby', srvT = 0, clk = 8, dust = 0, gust = {x: 0, z: 0}, hol = 'thanksgiving';
   const carMap = new Map();          // id -> car, kept between updates so near-misses count once
-  let others = [], goons = [], pickupsOff = new Set(), route = null, routeT = 0, tgtKey = '';
+  let goonWarn = 0, others = [], goons = [], pickupsOff = new Set(), route = null, routeT = 0, tgtKey = '';
   let lastSend = 0, info = null;
 
   /* ---- drawing ---- */
@@ -147,7 +147,15 @@ export function start(opts){
       else if(e.k === 'crash') snd('crash', e.imp);
       else if(e.k === 'carhit') snd('carhit');
       else if(e.k === 'boom') snd('boom');
+      else if(e.k === 'goons'){ snd('goons'); opts.hud.flash("SCHOOL'S OUT! Goons on scooters - ram them!", '#ff5a7a', true); buzz([60, 40, 60]); }
+      else if(e.k === 'haboob'){ snd('haboob'); opts.hud.flash('HABOOB! Dust storm coming', '#e0b07a', true); }
     });
+    // a goon closing in: say so, now and then
+    if(v && phase === 'day'){
+      let nd = 1e9; goons.forEach(g => { if(g[4] === 0){ const d = Math.hypot(g[0] - v.x, g[2] - v.z); if(d < nd) nd = d; } });
+      const now = performance.now();
+      if(nd < 35 && now - goonWarn > 9000){ goonWarn = now; snd('ping'); opts.hud.flash(v.cargo && v.cargo.length === 0 ? 'Goon on your tail!' : 'Goon on your tail - keep moving!', '#ff8aa0'); }
+    }
   }
   function drv(d){ resetVan(d); }
   function fx(f){

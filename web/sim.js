@@ -1204,8 +1204,11 @@ function goonTick(S){
   if(live.length < want && R() < DT * 0.8){
     var v = S.vans[Math.floor(R() * S.vans.length)];
     if(v){
-      var a = R() * Math.PI * 2, d = 110 + R() * 120;
-      var spot = M.roadSpot(v.x + Math.cos(a) * d, v.z + Math.sin(a) * d);
+      var a = R() * Math.PI * 2, d = 70 + R() * 90, cx = v.x, cz = v.z;
+      // half of them wait round the corner from where that van is headed
+      var tp = v.cargo.length && R() < 0.5 ? targetPoint(S, v) : null;
+      if(tp && Math.hypot(tp.x - v.x, tp.z - v.z) > 90){ cx = tp.x; cz = tp.z; d = 25 + R() * 30; }
+      var spot = M.roadSpot(cx + Math.cos(a) * d, cz + Math.sin(a) * d);
       var gn = {id: S.goonId++, x: spot.x, z: spot.z, y: 0, h: spot.h, v: 0, st: 'ride', t: 0, grab: 0, carry: null,
         name: GOON_NAMES[Math.floor(R() * GOON_NAMES.length)], color: Math.floor(R() * 6), tv: -1};
       S.goons.push(gn);
@@ -1241,14 +1244,16 @@ function goonTick(S){
       }
     } else {
       // chase whichever loaded van is nearest
+      // (an empty van gets pestered too, so everybody meets them)
       var best = null, bd = 1e9;
-      S.vans.forEach(function(v){ if(v.crash || !v.cargo.length) return; var d = Math.hypot(v.x - g.x, v.z - g.z); if(d < bd){ bd = d; best = v; } });
-      if(!best || bd > 260){ tx = g.x + Math.cos(g.h) * 20; tz = g.z + Math.sin(g.h) * 20; sp = 6; g.tv = -1;
+      S.vans.forEach(function(v){ if(v.crash) return; var d = Math.hypot(v.x - g.x, v.z - g.z) - (v.cargo.length ? 120 : 0); if(d < bd){ bd = d; best = v; } });
+      if(best) bd = Math.hypot(best.x - g.x, best.z - g.z);
+      if(!best || bd > 320){ tx = g.x + Math.cos(g.h) * 20; tz = g.z + Math.sin(g.h) * 20; sp = 6; g.tv = -1;
         if(R() < DT * 0.3) g.h += (R() - 0.5) * 2; }
       else {
         g.tv = best.i;
-        tx = best.x + best.vx * 0.6; tz = best.z + best.vz * 0.6; sp = 10.5;
-        if(bd < 3.2 && best.spd < 12){
+        tx = best.x + best.vx * 0.6; tz = best.z + best.vz * 0.6; sp = best.cargo.length ? 10.5 : 8.5;
+        if(bd < 3.2 && best.spd < 12 && best.cargo.length){
           g.grab += DT;
           if(g.grab > 0.7){
             var idx = Math.floor(R() * best.cargo.length), oid = best.cargo[idx];

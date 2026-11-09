@@ -179,7 +179,10 @@ made, and what is in the cooler).
 - Heat: 72 F at 8, 117 F at 3:30. Bouquets in a van wilt faster as it
   heats up; tips scale with freshness. Patio misters perk them up, ice
   chests reset them.
-- 3 p.m.: the Gilbert Goons on e-scooters chase loaded vans; at walking
+- 3 p.m.: the Gilbert Goons on e-scooters (bright hoodies, a red "!"
+  marker over each, every driver's phone announces them and warns when one
+  is within 35 m). Half of them wait near where a van is headed; they
+  pester empty vans too but only rob loaded ones; at walking
   speed they grab a bouquet and flee. Hit a goon (over 5 m/s) and it flies,
   +$5, boost, and you get the bouquet back. They go home at 6:36.
 - 6 p.m.: the haboob. Brown fog closes in, gusts shove the vans.
@@ -214,7 +217,10 @@ van reappears on the nearest road, ghosted for 2.2 s. Boost fills from
 drifts, near misses (within ~1.5 m of a car at 15+ m/s closing), air time,
 smashing bins and bushes, goons.
 
-Traffic spawns around the vans (about 22 per van, never within 85 m),
+Traffic is painted bright (`CAR_COLORS` in `view.js`) with headlights,
+taillights and a pool of light on the road: one additive, unfogged
+instanced mesh per car kind, so they show through the haboob. Vans have
+them too. Traffic spawns around the vans (about 22 per van, never within 85 m),
 follows lanes, stops at the lights (16 s cycle at arterial crossings), and
 brakes for vans in its lane.
 
@@ -241,6 +247,11 @@ van, by, prio, secsLeft, customer, pref, stems, wrap, ribbon]`.
   desert is a frame of four planes round it), so nothing reads as a hole.
 - Building faces are wound outward per face in `boxesGeo`; mixed winding
   was what made walls vanish.
+- The bench's bouquet is `touch-action: pan-y`: a touch that lands on a
+  placed flower cancels the scroll in `touchstart` (non-passive) and drags
+  it; anywhere else scrolls the page. The tray still grabs in Arrange mode
+  (dragging up to the bouquet is the same gesture as scrolling); in Easy
+  mode it scrolls too.
 - In a scrolling flex column, give the children `flex: none` or the card
   squashes and overlaps what follows (`#bench > *`).
 - Headless Chromium renders at ~5 fps in software, so the local join
