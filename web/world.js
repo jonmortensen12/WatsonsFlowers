@@ -183,6 +183,24 @@ function storeTex(){
   g.fillStyle = 'rgba(255,255,255,0.3)'; for(let x = 2; x < 64; x += 15) g.fillRect(x, 34, 1, 26);
   return tex(c, true);
 }
+function towerTex(){
+  // a storey of glass and a band of wall, repeating
+  const c = canvas(64, 64), g = c.getContext('2d');
+  g.fillStyle = '#ffffff'; g.fillRect(0, 0, 64, 64);
+  noise(g, 64, 64, 8);
+  g.fillStyle = 'rgba(30,50,75,0.8)';
+  for(let y = 4; y < 64; y += 16) for(let x = 3; x < 64; x += 16) g.fillRect(x, y, 11, 10);
+  g.fillStyle = 'rgba(255,255,255,0.25)';
+  for(let y = 4; y < 64; y += 16) for(let x = 3; x < 64; x += 16) g.fillRect(x, y, 4, 10);
+  return tex(c, true);
+}
+function containerTex(){
+  // corrugated steel
+  const c = canvas(64, 16), g = c.getContext('2d');
+  g.fillStyle = '#ffffff'; g.fillRect(0, 0, 64, 16);
+  for(let x = 0; x < 64; x += 4){ g.fillStyle = 'rgba(0,0,0,0.22)'; g.fillRect(x, 0, 2, 16); }
+  return tex(c, true);
+}
 function labelTex(text, opts){
   opts = opts || {};
   const W = opts.w || 512, H = opts.h || 128;
@@ -312,7 +330,7 @@ export function buildWorld(scene, M, opts){
     const p = geo.attributes.position;
     for(let i = 0; i < p.count; i++){ p.setY(i, M.height(bs.x + p.getX(i), bs.z + p.getZ(i))); }
     geo.computeVertexNormals();
-    const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({color: '#6f9a45'}));
+    const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({color: bs.k === 'pit' ? '#a5835a' : '#6f9a45'}));
     m.position.set(bs.x, 0.01, bs.z);
     scene.add(m);
   });
@@ -448,7 +466,9 @@ export function buildWorld(scene, M, opts){
   {
     const STORE = ['#e9dcc3', '#d7c4a3', '#efe7d8', '#c9b48f', '#e3d0b0', '#f2e6cc'];
     const BRICK = ['#9b4a32', '#a85a3c', '#8a3f2c', '#b06446', '#7f3a2a'];
-    const stores = [], bricks = [], campus = [], misc = [];
+    const stores = [], bricks = [], campus = [], misc = [], towers = [], boxes2 = [];
+    const GLASS = ['#9cc0dc', '#d9c6a0', '#b3c7d2', '#e6dccb', '#88a9c4', '#c9d8e2'];
+    const CONT = ['#c0392b', '#2e6fb7', '#e0a32e', '#2f8a4c', '#e86a1c', '#8a9097'];
     M.buildings.forEach(b => {
       if(b.k === 'store') stores.push({...b, color: STORE[b.color % STORE.length]});
       else if(b.k === 'brick') bricks.push({...b, color: BRICK[b.color % BRICK.length]});
@@ -457,6 +477,12 @@ export function buildWorld(scene, M, opts){
       else if(b.k === 'barn') misc.push({...b, color: '#9b3b2c'});
       else if(b.k === 'cabin') misc.push({...b, color: '#f3efe6'});
       else if(b.k === 'ramada') misc.push({...b, y0: 2.6, h: 0.5, color: '#8b6a4b'});
+      else if(b.k === 'tower') towers.push({...b, color: GLASS[b.color % GLASS.length]});
+      else if(b.k === 'container') boxes2.push({...b, color: CONT[b.color % CONT.length]});
+      else if(b.k === 'hangar'){ misc.push({...b, color: '#aab3ba'}); misc.push({x0: b.x0 + 3, x1: b.x1 - 3, z0: b.z0 - 0.1, z1: b.z1 + 0.1, h: 8, color: '#4e5961'}); }
+      else if(b.k === 'ctower'){ misc.push({...b, h: b.h - 4, color: '#ece6da'}); misc.push({x0: b.x0 - 1.5, x1: b.x1 + 1.5, z0: b.z0 - 1.5, z1: b.z1 + 1.5, y0: b.h - 4, h: 3.2, color: '#5fa2c9'}); misc.push({x0: b.x0 - 1.8, x1: b.x1 + 1.8, z0: b.z0 - 1.8, z1: b.z1 + 1.8, y0: b.h - 0.8, h: 0.8, color: '#d24a2a'}); }
+      else if(b.k === 'stand'){ misc.push({...b, color: '#cfc6b4'}); misc.push({x0: b.x0 - 1, x1: b.x1 + 1.5, z0: b.z0, z1: b.z1, y0: b.h + 2.5, h: 0.5, color: '#c4362f'}); }
+      else if(b.k === 'rock') misc.push({...b, color: '#a07e58'});
       else if(b.k === 'arts') {
         misc.push({...b, color: '#e1592f'});
         misc.push({x0: b.x0 + 4, x1: b.x1 - 10, z0: b.z0 + 2, z1: b.z1 - 2, y0: b.h, h: 4, color: '#3aa0c8'});
@@ -466,6 +492,8 @@ export function buildWorld(scene, M, opts){
     if(bricks.length) scene.add(new THREE.Mesh(boxesGeo(bricks, 1 / 4), new THREE.MeshLambertMaterial({vertexColors: true, map: brickTex()})));
     if(campus.length) scene.add(new THREE.Mesh(boxesGeo(campus, 1 / 6), new THREE.MeshLambertMaterial({vertexColors: true, map: storeTex()})));
     if(misc.length) scene.add(new THREE.Mesh(boxesGeo(misc), new THREE.MeshLambertMaterial({vertexColors: true})));
+    if(towers.length) scene.add(new THREE.Mesh(boxesGeo(towers, 1 / 5), new THREE.MeshLambertMaterial({vertexColors: true, map: towerTex()})));
+    if(boxes2.length) scene.add(new THREE.Mesh(boxesGeo(boxes2, 1 / 3), new THREE.MeshLambertMaterial({vertexColors: true, map: containerTex()})));
     // ramada posts
     M.buildings.filter(b => b.k === 'ramada').forEach(b => {
       [[b.x0, b.z0], [b.x1, b.z0], [b.x0, b.z1], [b.x1, b.z1]].forEach(([x, z]) => {
@@ -547,13 +575,17 @@ export function buildWorld(scene, M, opts){
 
   /* props: bins, bushes, light poles, bales - breakable, so they can vanish */
   {
-    const kinds = {bin: [], bush: [], pole: [], bale: []};
+    const kinds = {bin: [], bush: [], pole: [], bale: [], cone: [], crate: [], gate: [], tire: []};
     M.props.forEach(p => (kinds[p.k] || kinds.bush).push(p));
     const geos = {
       bin: [new THREE.CylinderGeometry(0.35, 0.3, 1.1, 8).translate(0, 0.55, 0), '#2f6b3f'],
       bush: [new THREE.IcosahedronGeometry(0.9, 0).translate(0, 0.6, 0), '#7a9a4a'],
       pole: [new THREE.CylinderGeometry(0.1, 0.14, 8, 6).translate(0, 4, 0), '#8d8d8d'],
-      bale: [new THREE.BoxGeometry(1.4, 0.9, 0.9).translate(0, 0.45, 0), '#d8b45a']
+      bale: [new THREE.BoxGeometry(1.4, 0.9, 0.9).translate(0, 0.45, 0), '#d8b45a'],
+      cone: [new THREE.ConeGeometry(0.3, 0.8, 8).translate(0, 0.4, 0), '#ff6a13'],
+      crate: [new THREE.BoxGeometry(1.3, 1.3, 1.3).translate(0, 0.65, 0), '#b8874e'],
+      gate: [mergeGeos([new THREE.BoxGeometry(0.2, 1.6, 0.2).translate(0, 0.8, 0), new THREE.BoxGeometry(2.3, 0.35, 0.12).translate(0, 1.3, 0), new THREE.BoxGeometry(2.3, 0.35, 0.12).translate(0, 0.6, 0)]), '#ffd21f'],
+      tire: [new THREE.CylinderGeometry(0.6, 0.6, 1.2, 10).translate(0, 0.6, 0), '#2a2a2a']
     };
     const mt = new THREE.Matrix4();
     W.props = {};

@@ -176,7 +176,10 @@ await sleep(400);
 const info = await kid.evaluate(() => VAN && VAN.toss);
 ok(info && info.ok, 'the tosser sees the porch: ' + JSON.stringify(info));
 if(info){
-  const box = await kid.locator('#tcan').boundingBox();
+  // on a slow machine the tosser's page can be well behind its messages: let it catch up
+  await kid.bringToFront();
+  for(let i = 0; i < 40; i++){ const t0 = Date.now(); await kid.evaluate(() => 1); if(Date.now() - t0 < 300) break; }
+  const box = await kid.locator('#tcan').boundingBox({timeout: 120000});
   const cx = box.x + box.width / 2, cy = box.y + box.height * 0.58;
   const a = info.ang - Math.PI / 2, L = Math.min(box.width, box.height) * 0.75 * Math.max(0.12, info.d / 32) / 0.6 * 0.8;
   await kid.mouse.move(cx, cy); await kid.mouse.down();
@@ -216,9 +219,21 @@ ok(true, 'back in the lobby');
 await sleep(500);
 ok(await dad.evaluate(() => document.getElementById('jobs').classList.contains('on')), 'phones are back on the jobs screen');
 
-// a driver drops out: the computer takes the wheel
+// the other town: picked on one phone, followed by the TV and every phone
+await uncle.locator('#towns button', {hasText: 'Rattlesnake'}).click();
+await tv.waitForFunction(() => WTV.M.key === 'flats', null, {polling: 250, timeout: 30000});
+await sleep(1500);
+const towns = await Promise.all([dad, kid, aunt, grandma, uncle, tiny].map(p => p.evaluate(() => TOWN)));
+ok(towns.every(t => t === 'flats'), 'Rattlesnake Flats picked on a phone: the TV and every phone follow (' + towns.join(' ') + ')');
 await tiny.click('#startBtn');
-await tv.waitForFunction(() => WTV.G.phase === 'count' || WTV.G.phase === 'day', null, {polling: 250, timeout: 5000});
+await tv.waitForFunction(() => WTV.G.phase === 'count' || WTV.G.phase === 'day', null, {polling: 250, timeout: 10000});
+await dad.waitForFunction(() => cur === 'drive' && DRV && DRV.van, null, {polling: 300, timeout: 60000});
+const atShop = await dad.evaluate(() => { const sh = WMap.town('flats').shops[0], v = DRV.van; return Math.round(Math.hypot(v.x - sh.x, v.z - sh.z)); });
+ok(atShop < 60, "the driver's phone starts the day at Watson's in the Flats (" + atShop + ' m away)');
+ok(await tv.evaluate(() => WTV.G.S.M.key === 'flats' && WTV.G.S.M.houses.length > 400), 'the day runs in the Flats');
+await sleep(3000);
+
+// a driver drops out: the computer takes the wheel
 await dad.close();
 await tv.evaluate(() => { Object.values(WTV.NET.people).forEach(p => { if(p.name === 'Dad') p.seen -= 7000; }); });
 await sleep(1500);

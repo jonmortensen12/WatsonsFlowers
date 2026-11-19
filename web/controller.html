@@ -146,6 +146,9 @@
     <div id="lobbyBox" style="margin-top:14px">
       <div class="small" style="margin-bottom:6px">Today at the shop</div>
       <div class="hols" id="hols"></div>
+      <div class="small" style="margin:12px 0 6px">Where</div>
+      <div class="hols" id="towns"></div>
+      <div class="small" id="townBlurb" style="margin-top:6px"></div>
       <button class="gold" id="startBtn" style="width:100%; margin-top:12px; font-size:22px; padding:16px">START THE DAY</button>
       <div class="small" style="margin-top:8px; text-align:center">Anybody can press start. Jobs can change any time.</div>
     </div>
@@ -233,6 +236,7 @@
 </div>
 
 <script src="geo.js"></script>
+<script src="flats.js"></script>
 <script src="map.js"></script>
 <script src="sim.js"></script>
 <script src="net.js"></script>
@@ -347,13 +351,14 @@ function onHost(d){
     case 'host': if(d.min > PROTO){ note('Updating...'); setTimeout(() => location.reload(), 500); } break;
     case 'you':
       Object.assign(ME, {role: d.role, van: d.van, ph: d.ph, drv: d.drv || [], vans: d.vans || [], hol: d.hol, id: d.id});
+      setTown(d.map);
       $('hello').textContent = 'Hi, ' + d.name + '!';
       if(d.role) pickingJob = false;
       renderJobs();
       route();
       break;
     case 'full': note('All six vans are taken - try tossing!'); setTimeout(() => note(''), 3000); break;
-    case 's': SNAP = d; onSnap(); if(performance.now() - lastTx > 1000) tx({t: 'ping'}); break;
+    case 's': SNAP = d; setTown(d.map); onSnap(); if(performance.now() - lastTx > 1000) tx({t: 'ping'}); break;
     case 'v': VAN = d; onVan(); if(DRV) DRV.info(d); break;
     case 'fx': if(DRV && ME.role === 'drive') DRV.fx(d); else onFx(d); break;
     case 'drv': lastDrv = d; if(DRV) DRV.drv(d); break;
@@ -397,6 +402,15 @@ function renderJobs(){
     b.onclick = () => tx({t: 'hol', k});
     $('hols').appendChild(b);
   });
+  $('towns').innerHTML = '';
+  WMap.TOWNS.forEach(t => {
+    const b = document.createElement('button');
+    b.textContent = t.name;
+    b.className = TOWN === t.k ? 'sel' : '';
+    b.onclick = () => { tx({t: 'map', k: t.k}); sound('click'); };
+    $('towns').appendChild(b);
+  });
+  $('townBlurb').textContent = WMap.townInfo(TOWN).blurb;
 }
 function showRide(){
   const box = $('rideBox');
@@ -408,7 +422,7 @@ function showRide(){
   list.forEach(d => { const b = document.createElement('button'); b.textContent = d[1]; b.className = 'pink'; b.style.margin = '0 6px 6px 0'; b.onclick = () => { tx({t: 'pick', role: 'toss', ride: d[0]}); box.style.display = 'none'; }; box.appendChild(b); });
   vans.forEach(v => { if(list.some(d => d[2] === v[0])) return; const b = document.createElement('button'); b.textContent = v[1]; b.style.margin = '0 6px 6px 0'; b.onclick = () => { tx({t: 'pick', role: 'toss', van: v[0]}); box.style.display = 'none'; }; box.appendChild(b); });
 }
-$('startBtn').onclick = () => { tx({t: 'start', hol: SNAP ? SNAP.hol : ME.hol}); buzz(20); };
+$('startBtn').onclick = () => { tx({t: 'start', hol: SNAP ? SNAP.hol : ME.hol, map: TOWN}); buzz(20); };
 $('renameBtn').onclick = () => { const n = prompt('Your name', myName); if(n){ myName = n.trim().slice(0, 14); store('wats_name', myName); tx({t: 'name', name: myName}); } };
 ['dJobs', 'tJobs', 'aJobs', 'gJobs', 'xJobs', 'cJobs'].forEach(id => $(id).onclick = () => { pickingJob = true; renderJobs(); show('jobs'); });
 
@@ -530,11 +544,19 @@ const HUD = {
     }
   }
 };
-let townForArrow = null;
+/* which town the TV is in: everything on this phone that knows the streets
+   follows it (the 3D drive is rebuilt for the new one) */
+let TOWN = 'mesa';
+function setTown(k){
+  if(!k || k === TOWN) return;
+  TOWN = k; MAP = null;
+  if(DRV){ DRV.stop(); DRV = null; if(cur === 'drive') loadDrive(); }
+  if(cur === 'jobs') renderJobs();
+}
 function tgtAngle(v){
   if(!v.tgt) return null;
-  if(!townForArrow) townForArrow = WMap.build(WGEO, 1927);
-  const p = v.tgt.k === 'house' ? townForArrow.houses[v.tgt.id].porch : townForArrow.shops[v.tgt.id];
+  const T = WMap.town(TOWN);
+  const p = v.tgt.k === 'house' ? T.houses[v.tgt.id].porch : T.shops[v.tgt.id];
   if(!p) return null;
   return Math.atan2(p.z - v.z, p.x - v.x) - v.h;
 }
@@ -543,7 +565,7 @@ function loadDrive(){
   drvLoading = true;
   WBouquet.load(() => {});
   import('./drive.js').then(m => {
-    DRV = m.start({canvas: $('d3'), hud: HUD, send: tx, norender: NORENDER, view: () => VIEW});
+    DRV = m.start({canvas: $('d3'), hud: HUD, send: tx, norender: NORENDER, view: () => VIEW, town: TOWN});
     if(lastDrv) DRV.drv(lastDrv);
     if(VAN) DRV.info(VAN);
     drvLoading = false;
@@ -1051,7 +1073,7 @@ function mapView(){
   return {sc, ox: (W - MAP.W * sc) / 2, oy: (H - MAP.H * sc) / 2};
 }
 function drawDispatch(){
-  if(!MAP) MAP = WMap.build(WGEO, 1927);
+  if(!MAP) MAP = WMap.town(TOWN);
   const c = $('dmap'), g = c.getContext('2d'), dpr = c._dpr || 1;
   const s = SNAP; if(!s) return;
   const {sc, ox, oy} = mapView();

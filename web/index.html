@@ -24,6 +24,7 @@
 <canvas id="hud"></canvas>
 <div id="loading">Opening the shop...</div>
 <script src="geo.js"></script>
+<script src="flats.js"></script>
 <script src="map.js"></script>
 <script src="sim.js"></script>
 <script src="net.js"></script>
@@ -53,12 +54,12 @@ const ROLE_NAMES = {drive: 'Driver', toss: 'Tosser', arrange: 'Arranger', grow: 
 const HOLIDAYS = SIM.HOLIDAYS, HKEYS = SIM.HOLIDAY_KEYS;
 
 /* ---------------- the save ---------------- */
-let SAVE = {records: {}, days: 0, holiday: 'thanksgiving'};
+let SAVE = {records: {}, days: 0, holiday: 'thanksgiving', map: 'mesa'};
 try { Object.assign(SAVE, JSON.parse(localStorage.getItem('wats_save') || '{}')); } catch(e){}
 function storeSave(){ try { localStorage.setItem('wats_save', JSON.stringify(SAVE)); } catch(e){} }
 
 /* ---------------- the town ---------------- */
-const M = WMap.build(WGEO, 1927);
+let M = WMap.town(SAVE.map);
 const G = {S: null, phase: 'lobby', paused: false, phaseT: 0, ticker: [], msgs: {}, flash: 0, recordNew: false, kbd: {}};
 function newSim(){
   G.S = SIM.create(M, {seed: (Date.now() & 0xffff) + 1, holiday: SAVE.holiday});
@@ -150,7 +151,7 @@ function tellYou(p){
   if(p.role === 'toss') p.van = vanFor(p);
   const drv = drivers().map(d => [d.id, d.name, d.van]);
   const vans = S.vans.map(v => [v.i, v.name, v.color]);
-  send(p, {t: 'you', role: p.role, van: p.van, name: p.name, id: p.id, ph: G.phase, drv, vans, hol: SAVE.holiday});
+  send(p, {t: 'you', role: p.role, van: p.van, name: p.name, id: p.id, ph: G.phase, drv, vans, hol: SAVE.holiday, map: M.key});
 }
 function tellAll(){ Object.values(NET.people).forEach(tellYou); }
 /* a driver's phone takes the van from here */
@@ -215,7 +216,10 @@ function onPhone(p, d){
       break;
     }
     case 'start':
-      if(G.phase === 'lobby'){ if(d.hol && HOLIDAYS[d.hol]) SAVE.holiday = d.hol; startDay(); }
+      if(G.phase === 'lobby'){ if(d.hol && HOLIDAYS[d.hol]) SAVE.holiday = d.hol; if(d.map) setMap(d.map); startDay(); }
+      break;
+    case 'map':
+      if(G.phase === 'lobby') setMap(d.k);
       break;
     case 'hol':
       if(G.phase === 'lobby' && HOLIDAYS[d.k]){ SAVE.holiday = d.k; storeSave(); G.S.holiday = d.k; tellAll(); sfx('click'); }
@@ -362,6 +366,7 @@ addEventListener('keydown', e => {
   if(e.code === 'KeyP' && G.phase === 'day'){ G.paused = !G.paused; G.S.paused = G.paused; }
   if(e.code === 'KeyM') toggleMute();
   if(e.code === 'KeyF'){ if(document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().catch(() => {}); }
+  if(e.code === 'KeyT' && G.phase === 'lobby'){ const ks = WMap.TOWNS.map(q => q.k); setMap(ks[(ks.indexOf(M.key) + 1) % ks.length]); }
   if(e.code === 'KeyH' && G.phase === 'lobby'){ const i = (HKEYS.indexOf(SAVE.holiday) + 1) % HKEYS.length; SAVE.holiday = HKEYS[i]; G.S.holiday = SAVE.holiday; storeSave(); tellAll(); }
 });
 addEventListener('keyup', e => { G.kbd[e.code] = false; });
@@ -379,8 +384,24 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 renderer.autoClear = false;
 const scene = new THREE.Scene();
-const world = buildWorld(scene, M);
-const V = createView(scene, M);
+let world = buildWorld(scene, M);
+let V = createView(scene, M);
+/* the town, swapped in the lobby: everything in the scene is the town's,
+   so it all goes and the new town is built in its place */
+function setMap(key){
+  if(G.phase !== 'lobby' || WMap.townInfo(key).k === M.key) return;
+  SAVE.map = WMap.townInfo(key).k; storeSave();
+  scene.traverse(o => { if(o.geometry) o.geometry.dispose(); if(o.material) [].concat(o.material).forEach(m => { if(m.map) m.map.dispose(); m.dispose(); }); });
+  while(scene.children.length) scene.remove(scene.children[0]);
+  M = WMap.town(SAVE.map);
+  world = buildWorld(scene, M);
+  V = createView(scene, M);
+  pingObjs.length = 0; parade = null; mapCache = null; brokenShown = {};
+  newSim();
+  rebuildVans();
+  tellAll();
+  sfx('click');
+}
 const hud = document.getElementById('hud'), H = hud.getContext('2d');
 let VW = 0, VH = 0, DPR = 1;
 function resize(){
@@ -814,8 +835,14 @@ function buildMap(r){
   g.fillStyle = '#d8bf93'; g.fillRect(M.bounds.x0, M.bounds.z0, M.bounds.x1 - M.bounds.x0, M.bounds.z1 - M.bounds.z0);
   M.cells.forEach(cl => {
     const col = {homes: '#b9c98f', grandpa: '#b9c98f', strip: '#c4cc9a', park: '#93bf6c', pondpark: '#93bf6c', riparian: '#8fbf7a', temple: '#a9d08a',
-      grove: '#7fa45a', farm: '#c9b277', plaza: '#cfc7b8', downtown: '#c9b8a6', heritage: '#c9b8a6', campus: '#cfc7b8', school: '#c9c08f', watsons: '#f2c6cf'}[cl.type];
+      grove: '#7fa45a', farm: '#c9b277', plaza: '#cfc7b8', downtown: '#c9b8a6', heritage: '#c9b8a6', campus: '#cfc7b8', school: '#c9c08f', watsons: '#f2c6cf',
+      towers: '#b9bcc4', airfield: '#c3c3bd', speedway: '#c7c2b8', yard: '#c2b6a2', quarry: '#c8a77a', canal: '#93bf6c'}[cl.type];
     if(col){ g.fillStyle = col; g.fillRect(cl.x0, cl.z0, cl.x1 - cl.x0, cl.z1 - cl.z0); }
+  });
+  // the big buildings, containers and boulders
+  M.buildings.forEach(b => {
+    const col = {tower: '#8f96a3', container: '#a0705a', hangar: '#9aa1a6', ctower: '#9aa1a6', stand: '#b0473f', rock: '#9a7b58'}[b.k];
+    if(col){ g.fillStyle = col; g.fillRect(b.x0, b.z0, b.x1 - b.x0, b.z1 - b.z0); }
   });
   // houses as tiny roofs
   g.fillStyle = 'rgba(170,80,55,0.55)';
@@ -865,8 +892,8 @@ function drawBoard(B, dt){
   H.fillStyle = 'rgba(40,40,50,0.55)';
   S.cars.forEach(c => H.fillRect(X(c.x) - 1.5, Z(c.z) - 1.5, 3, 3));
   // landmarks
-  const lm = WGEO.lm;
-  [['temple', 'Mesa Temple'], ['neon', 'Neon Garden'], ['tower', 'Water Tower'], ['riparian', 'Riparian Preserve'], ['freestone', 'Freestone Park'], ['mcc', 'MCC']].forEach(([k, n]) => {
+  const lm = M.G.lm;
+  (M.G.labels || [['temple', 'Mesa Temple'], ['neon', 'Neon Garden'], ['tower', 'Water Tower'], ['riparian', 'Riparian Preserve'], ['freestone', 'Freestone Park'], ['mcc', 'MCC']]).forEach(([k, n]) => {
     const p = lm[k]; if(p) { H.globalAlpha = 0.75; mapLabel(n, X(p.x), Z(p.z), '#f4ecd2', 11); H.globalAlpha = 1; }
   });
   // the orders: where every bouquet is wanted
@@ -887,7 +914,7 @@ function drawBoard(B, dt){
     const x = X(sh.x), y = Z(sh.z);
     H.fillStyle = '#f2a7b4'; H.beginPath(); H.arc(x, y, 11, 0, Math.PI * 2); H.fill(); H.strokeStyle = '#fff'; H.lineWidth = 3; H.stroke();
     H.fillStyle = '#7a1f3a'; H.font = 'bold 12px Georgia'; H.textAlign = 'center'; H.textBaseline = 'middle'; H.fillText('W', x, y + 1);
-    mapLabel(sh.key === 'watsons' ? "Watson's - 2525 W Main" : "Grandpa's - 122 E Palo Verde", x, y + 22, '#f7cfd6', 12);
+    mapLabel(sh.key === 'watsons' ? (M.key === 'flats' ? "Watson's" : "Watson's - 2525 W Main") : (M.key === 'flats' ? "Grandpa's" : "Grandpa's - 122 E Palo Verde"), x, y + 22, '#f7cfd6', 12);
   });
   // goons
   S.goons.forEach(g => {
@@ -941,7 +968,7 @@ function drawBoard(B, dt){
   labelBox = null;
   // the legend, above the map
   const ly = Math.max(r[1] + 12, ms.y0 - 14);
-  txt('Mesa & Gilbert', ms.x0 + 4, ly, 14, '#f2c531');
+  txt(M.name, ms.x0 + 4, ly, 14, '#f2c531');
   txt('●  ready at the shop', ms.x0 + 140, ly, 12, '#ff6fa6');
   txt('◉  in a van, on its way', ms.x0 + 290, ly, 12, '#fff');
   txt('G  Gilbert Goon', ms.x0 + 460, ly, 12, '#ff8a8a');
@@ -1079,7 +1106,7 @@ function drawLobby(){
   txt('Today: ' + hol.name, pad + 18 * u, y + 26 * u, Math.round(24 * u), '#f2c531');
   H.font = '500 ' + Math.round(17 * u) + 'px system-ui'; txt(fit(hol.blurb, tw - 36 * u), pad + 18 * u, y + 54 * u, Math.round(17 * u), '#f7cfd6', 'left', '500');
   const rec = SAVE.records[SAVE.holiday] || 0;
-  txt(rec ? 'Family record: $' + rec.toLocaleString() : 'No family record yet', pad + 18 * u, y + 80 * u, Math.round(15 * u), '#ccc', 'left', '500');
+  txt('Town: ' + WMap.townInfo(M.key).name + (rec ? '   ·   Family record: $' + rec.toLocaleString() : ''), pad + 18 * u, y + 80 * u, Math.round(15 * u), '#ccc', 'left', '500');
   // the crew, by job, across the bottom
   // just tall enough for the longest list, at the bottom, so the sign shows
   const ppl = Object.values(NET.people);
@@ -1196,7 +1223,7 @@ setInterval(() => { engineTick(); musicTick(); }, 100);
 rebuildVans();
 requestAnimationFrame(frame);
 // for netcheck and the curious
-window.WTV = {G, NET, M, startDay, startParade, toLobby, scene, renderer, V};
+window.WTV = {G, NET, get M(){ return M; }, startDay, startParade, toLobby, scene, renderer, get V(){ return V; }, setMap};
 </script>
 </body>
 </html>

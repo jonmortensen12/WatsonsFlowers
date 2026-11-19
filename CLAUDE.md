@@ -22,7 +22,7 @@ and off the internet. Run the checks from the repo root.
 ## Before shipping
 
 ```
-node simcheck.mjs          # the simulation, headless: handling, crashes, canal jumps, whole days, parade (~1 min)
+node simcheck.mjs          # the simulation, headless: handling, crashes, canal jumps, whole days, parade, then Rattlesnake Flats (~2 min)
 node netcheck.mjs          # the TV and six phones in Chromium over ?local=1, every job (several minutes)
 python3 tools/bake.py      # regenerate web/geo.js after re-fetching tools/osm/roads.json
 node tools/art.mjs         # redraw the icons and link preview
@@ -30,6 +30,6 @@ python3 tools/flowers.py   # re-cut the flower photos into web/flowers/ (Pillow,
 ```
 
 `web/sim.js` decides everything that happens and draws nothing; `web/map.js`
-builds the town for the sim, the TV and the dispatcher's phone alike. Change
+builds the town (from `geo.js` or `flats.js`) for the sim, the TV and the dispatcher's phone alike. Change
 the driving, the orders or the map there and `simcheck` says whether the
 computer vans still deliver and the vans still feel quick.

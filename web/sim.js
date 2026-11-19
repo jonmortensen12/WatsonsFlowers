@@ -645,7 +645,7 @@ function collideStatic(S, v, ox, oz){
     for(k = 0; k < near.b.length; k++){
       var bi = near.b[k];
       b = M.boxes[bi];
-      if(v.y > b.h - 0.15) continue;
+      if(v.y > b.h - (b.deck ? 0.7 : 0.15)) continue;   // a roof you can drive on: the nose may reach it first
       if(b.k === 'wall' && S.wallsDown[bi]) continue;
       px = cx < b.x0 ? b.x0 : cx > b.x1 ? b.x1 : cx;
       pz = cz < b.z0 ? b.z0 : cz > b.z1 ? b.z1 : cz;
@@ -1330,7 +1330,7 @@ function weatherTick(S){
 /* ---------------- the parade ---------------- */
 function startParade(S){
   var M = S.M, l = M.gilbertLine;
-  var z0 = M.G.ew[5].z - 40;   // just north of Guadalupe
+  var z0 = M.G.paradeZ != null ? M.G.paradeZ : M.G.ew[5].z - 40;   // Mesa: just north of Guadalupe
   S.parade = {t: 0, dur: 40, x: l.p, z: z0, z0: z0, speed: 7, h: Math.PI / 2};
   S.ph = 'parade';
   emit(S, {k: 'parade'});
@@ -1538,7 +1538,7 @@ function packVan(v){
 var STATE_CODE = {'new': 0, arr: 1, ready: 2, van: 3, air: 4, stolen: 5, done: 6, lost: 7};
 function snap(S){
   var out = {ph: S.ph, clk: Math.round(S.clock * 100) / 100, tmp: Math.round(tempAt(S.clock)), $: S.money,
-    rep: Math.round(S.rep * 10) / 10, dust: Math.round(S.dust * 100) / 100, hol: S.holiday,
+    rep: Math.round(S.rep * 10) / 10, dust: Math.round(S.dust * 100) / 100, hol: S.holiday, map: S.M.key || 'mesa',
     stk: S.stock.slice(), cnt: S.ph === 'count' ? Math.ceil(S.count) : 0,
     ord: [], vans: [], goons: [], pings: [], gar: null, del: S.delivered};
   S.orders.forEach(function(o){

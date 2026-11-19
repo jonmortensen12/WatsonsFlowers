@@ -6,6 +6,10 @@ phone is a job at Watson's Flowers on Main Street (est. 1927): drive a van
 dispatch, or sell roses from Irene's cart. Beat the heat, dodge the Gilbert
 Goons, outrun the haboob, then ride in the Gilbert Days Parade.
 
+Two towns, picked in the lobby: the real Mesa & Gilbert, or Rattlesnake
+Flats, a made-up town built for driving (downtown alleys, an airfield with
+mega ramps, a speedway, a container yard, a quarry, canal jumps).
+
 Open `index.html` on the TV, scan the QR code with phones. No phones: press
 Enter and drive with the arrow keys.
 

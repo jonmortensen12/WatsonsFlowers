@@ -15,7 +15,7 @@ import {createView} from './view.js';
 const SIM = window.WSim;
 
 export function start(opts){
-  const M = WMap.build(WGEO, 1927);
+  const M = WMap.town(opts.town || 'mesa');
   const L = SIM.local(M);
   let v = null, myI = -1, phase = 'lobby', srvT = 0, clk = 8, dust = 0, gust = {x: 0, z: 0}, hol = 'thanksgiving';
   const carMap = new Map();          // id -> car, kept between updates so near-misses count once

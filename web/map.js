@@ -40,6 +40,7 @@ var LOOP_NAMES = ['Saguaro', 'Mesquite', 'Ocotillo', 'Agave', 'Cottonwood', 'Jun
   'Hackberry', 'Acacia', 'Jacaranda', 'Citrus', 'Orange Blossom', 'Lemon', 'Pecan', 'Olive',
   'Cactus Wren', 'Roadrunner', 'Quail', 'Coyote', 'Javelina', 'Dove', 'Hummingbird', 'Gila',
   'Superstition', 'Sunset', 'Monsoon', 'Canal', 'Orchard', 'Dairy', 'Pioneer', 'Temple View'];
+var PROP_R = {bush: 0.9, pole: 0.3, bin: 0.5, bale: 0.5, cone: 0.4, crate: 0.8, gate: 1.1, tire: 0.7};
 var SUFFIX = ['Street', 'Avenue', 'Drive', 'Circle', 'Lane', 'Way', 'Place', 'Court'];
 var STORES = ['TACOS', 'DONUTS', 'PHARMACY', 'SNO-CONES', 'PIZZA', 'BOBA', 'TIRES', 'NAILS',
   'MATTRESS', 'BURGERS', 'HARDWARE', 'GROCERY', 'DENTIST', 'GYM', 'CAR WASH', 'TAMALES',
@@ -68,15 +69,16 @@ function build(G, seed){
   addLine('ns', fNS.x, 'fwy', [{name: fNS.name, cut: null}]);
   G.ns.forEach(function(a, i){
     addLine('ns', a.x, 'art', a.names.map(function(n){ return {name: n.name, cut: n.z}; }));
-    if(i < G.ns.length - 1 && G.ns[i + 1].x - a.x > 250)
-      addLine('ns', (a.x + G.ns[i + 1].x) / 2, 'col', [{name: NS_COLLECTORS[i % NS_COLLECTORS.length], cut: null}]);
+    var cn = G.nsCol ? G.nsCol[i] : NS_COLLECTORS[i % NS_COLLECTORS.length];
+    if(i < G.ns.length - 1 && G.ns[i + 1].x - a.x > 250 && cn)
+      addLine('ns', (a.x + G.ns[i + 1].x) / 2, 'col', [{name: cn, cut: null}]);
   });
   G.ew.forEach(function(a, i){
     addLine('ew', a.z, 'art', [{name: a.names[0].name, cut: null}]);
     if(i < G.ew.length - 1){
       var mid = (a.z + G.ew[i + 1].z) / 2;
       if(Math.abs(mid - fEW.z) < 60) addLine('ew', fEW.z, 'fwy', [{name: fEW.name, cut: null}]);
-      else if(G.ew[i + 1].z - a.z > 250) addLine('ew', mid, 'col', [{name: EW_COLLECTORS[i % EW_COLLECTORS.length], cut: null}]);
+      else if(G.ew[i + 1].z - a.z > 250 && (G.ewCol ? G.ewCol[i] : true)) addLine('ew', mid, 'col', [{name: G.ewCol ? G.ewCol[i] : EW_COLLECTORS[i % EW_COLLECTORS.length], cut: null}]);
     }
   });
   M.lines = lines;
@@ -98,6 +100,7 @@ function build(G, seed){
   var cells = [];
   var basins = [];     // {x,z,rx,rz,d}
   var ramps = [];      // {x0,z0,x1,z1,dx,dz,h,len}
+  var decks = [];      // boxes you can drive on top of (container roofs): indices into boxes
   var pickups = [];    // {k:'keg'|'ice'|'boom', x,z}
   var misters = [];
   var trees = [];      // visual + solid circle: {x,z,k:'palm'|'pv'|'orange'|'saguaro'|'pine', s}
@@ -114,6 +117,7 @@ function build(G, seed){
   M.boxes = boxes; M.circles = circles; M.props = props; M.houses = houses; M.cells = cells;
   M.basins = basins; M.ramps = ramps; M.pickups = pickups; M.misters = misters; M.trees = trees;
   M.lots = lots; M.buildings = buildings; M.resRoads = resRoads; M.drives = drives; M.walls = walls;
+  M.decks = decks;
   M.signs = signs; M.canals = canals; M.ponds = ponds; M.fields = fields; M.lights = lights;
 
   /* ---------------- canal helpers ---------------- */
@@ -170,10 +174,28 @@ function build(G, seed){
   var gilbertLine = NSL.filter(function(l){ return /Gilbert/.test(l.names[0].name); })[0];
   var elliotLine = EWL.filter(function(l){ return /Elliot/.test(l.names[0].name); })[0];
   M.mainLine = mainLine; M.gilbertLine = gilbertLine;
+  M.name = G.name || 'Mesa & Gilbert';
 
+  function canalThrough(c){
+    // a canal's centreline crosses the middle of this cell
+    var w = c.x1 - c.x0, h = c.z1 - c.z0;
+    return canalDist((c.x0 + c.x1) / 2, (c.z0 + c.z1) / 2) < Math.min(w, h) / 2 - 10;
+  }
   cells.forEach(function(c){
     var w = c.x1 - c.x0, h = c.z1 - c.z0;
     var cxm = (c.x0 + c.x1) / 2, czm = (c.z0 + c.z1) / 2;
+    if(G.zones){
+      // a made-up town: districts by rectangle
+      var zn = null;
+      for(var q = 0; q < G.zones.length && !zn; q++) if(inRect({x: cxm, z: czm}, G.zones[q])) zn = G.zones[q];
+      if(inRect(LM.watsons, c, 14) && c.N === mainLine) c.type = 'watsons';
+      else if(zn) c.type = w < 60 || h < 60 ? 'desert' : zn.type;
+      else if(inRect(LM.grandpa, c)) c.type = 'grandpa';
+      else if(canalThrough(c)) c.type = 'canal';
+      else if(w < 95 || h < 95) c.type = 'desert';
+      else { var r0 = R(); c.type = r0 < 0.12 ? 'plaza' : r0 < 0.18 ? 'park' : r0 < 0.21 ? 'school' : 'homes'; }
+      return;
+    }
     if(inRect(LM.watsons, c, 14) && c.N === mainLine) c.type = 'watsons';
     else if(inRect(LM.grandpa, c)) c.type = 'grandpa';
     else if(inRect(LM.temple, c)) c.type = 'temple';
@@ -222,7 +244,7 @@ function build(G, seed){
   }
   function addProp(x, z, k){
     if(canalDist(x, z) < CANAL_CLEAR - 4) return;
-    props.push({x: x, z: z, r: k === 'bush' ? 0.9 : k === 'pole' ? 0.3 : 0.5, k: k});
+    props.push({x: x, z: z, r: PROP_R[k] || 0.5, k: k});
   }
   function store(x0, z0, x1, z1, face, h){
     var b = addBox(x0, z0, x1, z1, h || 6, 'store', {color: Math.floor(R() * 6)});
@@ -511,7 +533,7 @@ function build(G, seed){
     if(!best) return;
     best.grandpa = true; best.num = 122; best.dir = 'E';
     M.grandpaHouse = best.id;
-    M.shops.push({key: 'grandpa', name: "Grandpa's (Gilbert)", x: best.front.x, z: best.front.z, r: 11, house: best.id});
+    M.shops.push({key: 'grandpa', name: G.zones ? "Grandpa's" : "Grandpa's (Gilbert)", x: best.front.x, z: best.front.z, r: 11, house: best.id});
   }
 
   function templeCell(c){
@@ -599,6 +621,202 @@ function build(G, seed){
     for(var k = 0; k < 20; k++) addTree(c.x0 + R() * w, c.z0 + R() * h, 'palm');
   }
 
+
+  /* ---------------- the made-up town's districts ---------------- */
+  // a jump: the lip at (lx, lz), climbing along +axis*dir to height h over len
+  function addRamp(lx, lz, axis, dir, len, h, wid){
+    wid = wid || 5;
+    if(axis === 'x'){ var s0 = lx - dir * len; ramps.push({x0: Math.min(s0, lx), x1: Math.max(s0, lx), z0: lz - wid / 2, z1: lz + wid / 2, dx: dir, dz: 0, s0: s0, h: h, len: len}); }
+    else { var s1 = lz - dir * len; ramps.push({z0: Math.min(s1, lz), z1: Math.max(s1, lz), x0: lx - wid / 2, x1: lx + wid / 2, dx: 0, dz: dir, s0: s1, h: h, len: len}); }
+  }
+  function building(x0, z0, x1, z1, h, k, extra){
+    var b = addBox(x0, z0, x1, z1, h, k, extra);
+    if(b){ var o = {x0: b.x0, z0: b.z0, x1: b.x1, z1: b.z1, h: h, k: k}; if(extra) for(var q in extra) o[q] = extra[q]; buildings.push(o); }
+    return b;
+  }
+  function gateRow(ax, az, bx, bz){
+    var n = Math.max(2, Math.round(Math.hypot(bx - ax, bz - az) / 2.2));
+    for(var k = 0; k <= n; k++) addProp(ax + (bx - ax) * k / n, az + (bz - az) * k / n, 'gate');
+  }
+  // canal jumps: ramps across the canal, alternating ways, all along it
+  function canalJumps(c){
+    var gap = CANAL_W / 2 + BANK_W + 1;
+    canals.forEach(function(cn){
+      var p = cn.pts;
+      for(var k = 0; k < p.length - 1; k++){
+        var ax = p[k][0], az = p[k][1], bx = p[k + 1][0], bz = p[k + 1][1];
+        if(Math.abs(bx - ax) < 1){         // runs north-south: jump east-west
+          if(ax < c.x0 || ax > c.x1) continue;
+          var n = 0;
+          for(var z = c.z0 + 30; z < c.z1 - 25; z += 55, n++){ var d = n % 2 ? 1 : -1; addRamp(ax - d * gap, z, 'x', d, 12, 2.8, 6); }
+        } else if(Math.abs(bz - az) < 1){  // runs east-west: jump north-south
+          if(az < c.z0 || az > c.z1) continue;
+          var m = 0;
+          for(var x = c.x0 + 30; x < c.x1 - 25; x += 55, m++){ var e = m % 2 ? 1 : -1; addRamp(x, az - e * gap, 'z', e, 12, 2.8, 6); }
+        }
+      }
+    });
+  }
+  function canalCell(c){
+    fields.push({x0: c.x0, z0: c.z0, x1: c.x1, z1: c.z1, k: 'grass'});
+    canalJumps(c);
+    for(var k = 0; k < 14; k++) addTree(c.x0 + 8 + R() * (c.x1 - c.x0 - 16), c.z0 + 8 + R() * (c.z1 - c.z0 - 16), R() < 0.6 ? 'palm' : 'pv');
+  }
+
+  // downtown: towers on a grid of alleys; gates across the alley mouths
+  function towersCell(c){
+    lots.push({x0: c.x0, z0: c.z0, x1: c.x1, z1: c.z1, k: 'lot'});
+    var A = 10, w = c.x1 - c.x0, h = c.z1 - c.z0;
+    var nx = Math.max(2, Math.round(w / 52)), nz = Math.max(2, Math.round(h / 52));
+    var bw = (w - 4 - (nx - 1) * A) / nx, bh = (h - 4 - (nz - 1) * A) / nz;
+    var xs = [], zs = [];
+    for(var i = 0; i < nx; i++) xs.push(c.x0 + 2 + i * (bw + A));
+    for(var j = 0; j < nz; j++) zs.push(c.z0 + 2 + j * (bh + A));
+    // the alleys
+    for(var i2 = 1; i2 < nx; i2++){ var ax = xs[i2] - A / 2; resRoads.push({x0: ax - A / 2, x1: ax + A / 2, z0: c.z0, z1: c.z1, name: 'Alley'});
+      if(R() < 0.65) gateRow(ax - A / 2 + 0.8, c.z0 + 1.5, ax + A / 2 - 0.8, c.z0 + 1.5);
+      if(R() < 0.65) gateRow(ax - A / 2 + 0.8, c.z1 - 1.5, ax + A / 2 - 0.8, c.z1 - 1.5);
+      if(R() < 0.5) pickups.push({k: 'keg', x: ax, z: c.z0 + h * (0.3 + R() * 0.4)}); }
+    for(var j2 = 1; j2 < nz; j2++){ var az = zs[j2] - A / 2; resRoads.push({z0: az - A / 2, z1: az + A / 2, x0: c.x0, x1: c.x1, name: 'Alley'});
+      if(R() < 0.65) gateRow(c.x0 + 1.5, az - A / 2 + 0.8, c.x0 + 1.5, az + A / 2 - 0.8);
+      if(R() < 0.65) gateRow(c.x1 - 1.5, az - A / 2 + 0.8, c.x1 - 1.5, az + A / 2 - 0.8);
+      // a kicker in the alley, into a crossing
+      if(R() < 0.45 && nx > 1){ var kx = xs[1] - A / 2 - (R() < 0.5 ? 14 : -14); addRamp(kx, az, 'x', kx < xs[1] - A / 2 ? 1 : -1, 8, 1.8, 5); } }
+    // the blocks
+    for(var bi = 0; bi < nx; bi++) for(var bj = 0; bj < nz; bj++){
+      var x0 = xs[bi], z0 = zs[bj], x1 = x0 + bw, z1 = z0 + bh;
+      if(R() < 0.12){
+        // a little plaza: a palm each corner, a fountain of crates in the middle
+        addTree(x0 + 4, z0 + 4, 'palm'); addTree(x1 - 4, z1 - 4, 'palm'); addTree(x0 + 4, z1 - 4, 'palm'); addTree(x1 - 4, z0 + 4, 'palm');
+        for(var q = 0; q < 4; q++) addProp((x0 + x1) / 2 + (q % 2 - 0.5) * 2, (z0 + z1) / 2 + (q > 1 ? 1 : -1), 'crate');
+        continue;
+      }
+      var tall = 16 + Math.floor(R() * 5) * 7 + (R() < 0.15 ? 25 : 0);
+      var face = bj === 0 ? 'n' : bj === nz - 1 ? 's' : bi === 0 ? 'w' : bi === nx - 1 ? 'e' : null;
+      var b = building(x0, z0, x1, z1, tall, 'tower', {color: Math.floor(R() * 6), face: face});
+      if(b && face){
+        var lab = STORES[Math.floor(R() * STORES.length)];
+        var fx = face === 'w' ? b.x0 : face === 'e' ? b.x1 : (b.x0 + b.x1) / 2, fz = face === 'n' ? b.z0 : face === 's' ? b.z1 : (b.z0 + b.z1) / 2;
+        signs.push({x: fx, z: fz, face: face, label: lab, w: 10, y: 3.6});
+      }
+    }
+  }
+
+  // the airfield: a runway with a mega ramp each way, kickers, hangars
+  function airfieldCell(c){
+    lots.push({x0: c.x0, z0: c.z0, x1: c.x1, z1: c.z1, k: 'lot'});
+    var w = c.x1 - c.x0, h = c.z1 - c.z0, alongX = w >= h;
+    var mid = alongX ? (c.z0 + c.z1) / 2 + h * 0.08 : (c.x0 + c.x1) / 2 + w * 0.08;
+    var a0 = (alongX ? c.x0 : c.z0) + 8, a1 = (alongX ? c.x1 : c.z1) - 8, L = a1 - a0;
+    if(alongX) resRoads.push({x0: a0, x1: a1, z0: mid - 13, z1: mid + 13, name: 'Runway'});
+    else resRoads.push({z0: a0, z1: a1, x0: mid - 13, x1: mid + 13, name: 'Runway'});
+    // the mega ramps: one each way, either side of the middle
+    if(alongX){ addRamp(a0 + L * 0.34, mid - 5, 'x', 1, 22, 7.5, 8); addRamp(a0 + L * 0.66, mid + 5, 'x', -1, 22, 7.5, 8); }
+    else { addRamp(mid - 5, a0 + L * 0.34, 'z', 1, 22, 7.5, 8); addRamp(mid + 5, a0 + L * 0.66, 'z', -1, 22, 7.5, 8); }
+    // cones down both edges of the runway
+    for(var t = a0 + 6; t < a1 - 6; t += 14){
+      if(alongX){ addProp(t, mid - 14.5, 'cone'); addProp(t, mid + 14.5, 'cone'); }
+      else { addProp(mid - 14.5, t, 'cone'); addProp(mid + 14.5, t, 'cone'); }
+    }
+    // hangars and the control tower along the far side
+    var side = alongX ? c.z0 + 4 : c.x0 + 4;
+    for(var k = 0; k < 3; k++){
+      var s0 = a0 + 10 + k * (L - 20) / 3, s1 = s0 + Math.min(34, (L - 20) / 3 - 10);
+      if(alongX) building(s0, side, s1, side + 22, 11, 'hangar', {label: 'HANGAR ' + (k + 1)});
+      else building(side, s0, side + 22, s1, 11, 'hangar', {label: 'HANGAR ' + (k + 1)});
+    }
+    var tx = alongX ? a1 - 14 : side + 36, tz = alongX ? side + 36 : a1 - 14;
+    building(tx - 4, tz - 4, tx + 4, tz + 4, 24, 'ctower');
+    // kickers on the apron, both ways
+    for(var q = 0; q < 4; q++){
+      var at = a0 + 20 + R() * (L - 40), off = (q % 2 ? 1 : -1) * (22 + R() * 10), dir = q < 2 ? 1 : -1;
+      if(alongX) addRamp(at, mid + off, 'x', dir, 9, 2.2, 6); else addRamp(mid + off, at, 'z', dir, 9, 2.2, 6);
+    }
+    pickups.push({k: 'keg', x: alongX ? a0 + L * 0.2 : mid, z: alongX ? mid : a0 + L * 0.2});
+    pickups.push({k: 'keg', x: alongX ? a0 + L * 0.8 : mid, z: alongX ? mid : a0 + L * 0.8});
+  }
+
+  // the speedway: a ring track, a grandstand, an infield of jumps
+  function speedwayCell(c){
+    lots.push({x0: c.x0, z0: c.z0, x1: c.x1, z1: c.z1, k: 'lot'});
+    var I = 14, T = 16;   // track centre inset, track width
+    var x0 = c.x0 + I, x1 = c.x1 - I, z0 = c.z0 + I, z1 = c.z1 - I, hw = T / 2;
+    resRoads.push({x0: x0 - hw, x1: x1 + hw, z0: z0 - hw, z1: z0 + hw, name: 'Speedway'});
+    resRoads.push({x0: x0 - hw, x1: x1 + hw, z0: z1 - hw, z1: z1 + hw, name: 'Speedway'});
+    resRoads.push({x0: x0 - hw, x1: x0 + hw, z0: z0 - hw, z1: z1 + hw, name: 'Speedway'});
+    resRoads.push({x0: x1 - hw, x1: x1 + hw, z0: z0 - hw, z1: z1 + hw, name: 'Speedway'});
+    var ix0 = x0 + hw + 2, ix1 = x1 - hw - 2, iz0 = z0 + hw + 2, iz1 = z1 - hw - 2;
+    fields.push({x0: ix0, z0: iz0, x1: ix1, z1: iz1, k: 'grass'});
+    // tyres round the infield, with gaps to cut across
+    function tyres(ax, az, bx, bz){ var n = Math.round(Math.hypot(bx - ax, bz - az) / 7); for(var k = 0; k <= n; k++) if(k % 6 !== 3) addProp(ax + (bx - ax) * k / n, az + (bz - az) * k / n, 'tire'); }
+    tyres(ix0, iz0, ix1, iz0); tyres(ix0, iz1, ix1, iz1); tyres(ix0, iz0, ix0, iz1); tyres(ix1, iz0, ix1, iz1);
+    // the grandstand, outside the long side nearest the freeway
+    building(c.x0 + 1, z0 + 30, c.x0 + I - hw - 1, z1 - 30, 7, 'stand');
+    // jumps across the infield, and one on each straight
+    var iw = ix1 - ix0, ih = iz1 - iz0;
+    for(var k = 0; k < 3; k++){
+      var zz = iz0 + ih * (0.25 + k * 0.25), dir = k % 2 ? -1 : 1;
+      addRamp(dir > 0 ? ix0 + iw * 0.4 : ix1 - iw * 0.4, zz, 'x', dir, 14, 3.6, 7);
+    }
+    addRamp(x1, z0 + (z1 - z0) * 0.5, 'z', 1, 12, 2.6, 7);
+    addRamp(x0, z0 + (z1 - z0) * 0.5, 'z', -1, 12, 2.6, 7);
+    for(var q = 0; q < 8; q++) addProp(ix0 + 10 + R() * (iw - 20), iz0 + 10 + R() * (ih - 20), 'crate');
+    pickups.push({k: 'keg', x: (x0 + x1) / 2, z: z1});
+    pickups.push({k: 'keg', x: (x0 + x1) / 2, z: z0});
+  }
+
+  // the rail yard: rows of containers two wide, a ramp onto each row
+  var CCOL = 6;
+  function yardCell(c){
+    lots.push({x0: c.x0, z0: c.z0, x1: c.x1, z1: c.z1, k: 'lot'});
+    var w = c.x1 - c.x0, h = c.z1 - c.z0, CL = 12.2, CW = 2.5, CH = 2.6;
+    var n = 0;
+    for(var z = c.z0 + 14; z + 2 * CW < c.z1 - 10; z += 2 * CW + 15, n++){
+      var len = Math.floor((w - 50) * (0.55 + R() * 0.35) / CL);
+      if(len < 2) continue;
+      var start = n % 2 ? c.x1 - 18 - len * CL : c.x0 + 18;
+      for(var k = 0; k < len; k++){
+        var x = start + k * CL;
+        for(var r2 = 0; r2 < 2; r2++){
+          var b = building(x, z + r2 * CW, x + CL, z + (r2 + 1) * CW, CH, 'container', {color: Math.floor(R() * CCOL)});
+          if(b){ b.deck = true; decks.push(boxes.length - 1); }
+        }
+      }
+      // up onto the roofs from one end; off the other end is a jump
+      var up = n % 2 ? 1 : -1;   // which end the ramp is at
+      if(up < 0) addRamp(start, z + CW, 'x', 1, 12, CH, 2 * CW);
+      else addRamp(start + len * CL, z + CW, 'x', -1, 12, CH, 2 * CW);
+      for(var q = 0; q < 3; q++) addProp(c.x0 + 10 + R() * (w - 20), z + 2 * CW + 4 + R() * 7, 'crate');
+    }
+    if(R() < 0.7) pickups.push({k: 'keg', x: (c.x0 + c.x1) / 2, z: c.z1 - 8});
+  }
+
+  // the quarry: dirt, boulders, ramps every way and a pit to jump
+  function quarryCell(c){
+    var w = c.x1 - c.x0, h = c.z1 - c.z0, cx = (c.x0 + c.x1) / 2, cz = (c.z0 + c.z1) / 2;
+    if(canalThrough(c)){ canalJumps(c); return; }
+    var prx = Math.min(30, w * 0.18), prz = Math.min(20, h * 0.14);
+    if(canalDist(cx, cz) > Math.max(prx, prz) + CANAL_CLEAR + 30 && w > 120 && h > 100){
+      basins.push({x: cx, z: cz, rx: prx, rz: prz, d: 6, k: 'pit'});
+      addRamp(cx - prx - 2, cz, 'x', 1, 16, 3.6, 7);
+      addRamp(cx + prx + 2, cz + 9, 'x', -1, 16, 3.6, 7);
+    }
+    for(var k = 0; k < 7; k++){
+      var bx = c.x0 + 10 + R() * (w - 30), bz = c.z0 + 10 + R() * (h - 30), s1 = 5 + R() * 9, s2 = 5 + R() * 9;
+      if(Math.abs(bx - cx) < prx + 30 && Math.abs(bz - cz) < prz + 16) continue;
+      building(bx, bz, bx + s1, bz + s2, 3 + R() * 5, 'rock');
+    }
+    for(var q = 0; q < 5; q++){
+      var rx = c.x0 + 25 + R() * (w - 50), rz = c.z0 + 25 + R() * (h - 50);
+      if(Math.abs(rx - cx) < prx + 22 && Math.abs(rz - cz) < prz + 22) continue;
+      if(R() < 0.5) addRamp(rx, rz, 'x', R() < 0.5 ? 1 : -1, 10, 2.4 + R() * 1.4, 6);
+      else addRamp(rx, rz, 'z', R() < 0.5 ? 1 : -1, 10, 2.4 + R() * 1.4, 6);
+    }
+    for(var p2 = 0; p2 < 10; p2++) addProp(c.x0 + 6 + R() * (w - 12), c.z0 + 6 + R() * (h - 12), R() < 0.5 ? 'bale' : 'crate');
+    for(var t2 = 0; t2 < 6; t2++) addTree(c.x0 + 6 + R() * (w - 12), c.z0 + 6 + R() * (h - 12), 'saguaro');
+    if(R() < 0.5) pickups.push({k: 'keg', x: cx, z: c.z0 + 10});
+  }
+
   cells.forEach(function(c){
     switch(c.type){
       case 'watsons': watsonsCell(c); break;
@@ -616,6 +834,12 @@ function build(G, seed){
       case 'school': schoolCell(c); break;
       case 'desert': desertCell(c); break;
       case 'strip': stripCell(c); break;
+      case 'towers': towersCell(c); break;
+      case 'airfield': airfieldCell(c); break;
+      case 'speedway': speedwayCell(c); break;
+      case 'yard': yardCell(c); break;
+      case 'quarry': quarryCell(c); break;
+      case 'canal': canalCell(c); break;
       default: homesCell(c);
     }
   });
@@ -689,7 +913,7 @@ function build(G, seed){
   (function(){
     var g = LM.grandpa, best = null, bd = 1e9;
     canals.forEach(function(cn){
-      if(!/Consolidated/.test(cn.name)) return;
+      if(cn.name.indexOf(G.boomCanal || 'Consolidated') < 0) return;
       var p = cn.pts;
       for(var k = 0; k < p.length - 1; k++){
         for(var t = 0; t <= 1; t += 0.05){
@@ -770,21 +994,33 @@ function build(G, seed){
 
   /* the ground's height: flat (this is Mesa) but for the canals, the
      retention basins and the ramps */
+  // jumps and container roofs, by 32 m square, so a height lookup only
+  // looks at the few nearby
+  var HG = 32, HGW = Math.ceil(X1 / HG) + 1, HGH = Math.ceil(Z1 / HG) + 1, hashR = new Array(HGW * HGH);
+  function hgPut(x0, z0, x1, z1, item){
+    for(var j = Math.max(0, Math.floor(z0 / HG)); j <= Math.min(HGH - 1, Math.floor(z1 / HG)); j++)
+      for(var i = Math.max(0, Math.floor(x0 / HG)); i <= Math.min(HGW - 1, Math.floor(x1 / HG)); i++){ var c = j * HGW + i; (hashR[c] || (hashR[c] = [])).push(item); }
+  }
+  ramps.forEach(function(rp){ hgPut(rp.x0, rp.z0, rp.x1, rp.z1, rp); });
+  decks.forEach(function(di){ var b = boxes[di]; hgPut(b.x0, b.z0, b.x1, b.z1, b); });
   M.height = function(x, z){
     var s = M.surf(x, z);
     if(s === SURF.WATER) return -2.8;
     var h = 0;
+    var cell = hashR[Math.floor(z / HG) * HGW + Math.floor(x / HG)];
+    if(x >= 0 && z >= 0 && x < X1 && z < Z1 && cell){
+      for(var q = 0; q < cell.length; q++){
+        var it = cell[q];
+        if(x < it.x0 || x > it.x1 || z < it.z0 || z > it.z1) continue;
+        if(it.len){ var al = it.dx ? (x - it.s0) * it.dx : (z - it.s0) * it.dz; if(al >= 0 && al <= it.len) h = Math.max(h, it.h * al / it.len); }
+        else if(it.h > h) h = it.h;
+      }
+    }
     for(var k = 0; k < basins.length; k++){
       var b = basins[k];
       var dx = (x - b.x) / b.rx, dz = (z - b.z) / b.rz;
       var r2 = dx * dx + dz * dz;
       if(r2 < 1){ var q = 1 - r2; h -= b.d * q * (2 - q) * 0.999 + 0; }
-    }
-    for(var r = 0; r < ramps.length; r++){
-      var rp = ramps[r];
-      if(x < rp.x0 || x > rp.x1 || z < rp.z0 || z > rp.z1) continue;
-      var along = rp.dx ? (x - rp.s0) * rp.dx : (z - rp.s0) * rp.dz;
-      if(along >= 0 && along <= rp.len) h = Math.max(h, rp.h * along / rp.len);
     }
     return h;
   };
@@ -1024,5 +1260,18 @@ function build(G, seed){
   return M;
 }
 
-root.WMap = {build: build, rng: rng, SURF: SURF};
+/* the towns to pick from in the lobby; built once each, on first use */
+var TOWNS = [
+  {k: 'mesa', name: 'Mesa & Gilbert', blurb: 'The real streets where the shop was: Main Street, Gilbert Road, the canals.', geo: 'WGEO'},
+  {k: 'flats', name: 'Rattlesnake Flats', blurb: 'Made for driving: downtown alleys, an airfield, a speedway, a rail yard and a quarry.', geo: 'WGEO_FLATS'}
+];
+var built = {};
+function town(key){
+  var t = TOWNS.filter(function(q){ return q.k === key && root[q.geo]; })[0] || TOWNS[0];
+  if(!built[t.k]){ built[t.k] = build(root[t.geo], 1927); built[t.k].key = t.k; }
+  return built[t.k];
+}
+function townInfo(key){ return TOWNS.filter(function(q){ return q.k === key; })[0] || TOWNS[0]; }
+root.WMap = {build: build, rng: rng, SURF: SURF, town: town, townInfo: townInfo,
+  TOWNS: TOWNS.map(function(t){ return {k: t.k, name: t.name, blurb: t.blurb}; })};
 })(typeof window !== 'undefined' ? window : globalThis);
