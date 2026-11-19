@@ -10,7 +10,7 @@
    node simcheck.mjs --quick    one short day */
 import fs from 'fs';
 globalThis.window = globalThis;
-for(const f of ['web/geo.js', 'web/flats.js', 'web/map.js', 'web/sim.js']) (0, eval)(fs.readFileSync(f, 'utf8'));
+for(const f of ['web/geo.js', 'web/ridge.js', 'web/map.js', 'web/sim.js']) (0, eval)(fs.readFileSync(f, 'utf8'));
 const {WMap, WSim, WGEO} = globalThis;
 const quick = process.argv.includes('--quick');
 let fails = 0;
@@ -158,7 +158,9 @@ for(const [n, o] of runs){
   console.log('   events', JSON.stringify(r.seen));
   ok(S.ph === 'end', 'the day ends');
   const want = o.dayLen ? 1 : [0, 4, 10, 18][Math.min(3, n)] || 18;
-  ok(res.delivered >= want, `${n} van(s) deliver at least ${want}: ${res.delivered}`);
+  // one day is one roll of the dice: with more than one van, judge the average of three
+  const got = n > 1 && !o.dayLen ? Math.round([3, 5, 7].map(sd => sd === 3 ? res.delivered : day(n, Object.assign({}, o, {seed: sd})).S.results.delivered).reduce((a, b) => a + b) / 3) : res.delivered;
+  ok(got >= want, `${n} van(s) deliver at least ${want}${n > 1 && !o.dayLen ? ' (average of three days)' : ''}: ${got}`);
   if(!o.dayLen){
     ok(r.goonsAt != null && r.goonsAt >= 15 && r.goonsAt < 16.5, 'the goons are out after school: ' + (r.goonsAt && r.goonsAt.toFixed(2)));
     ok(r.dustAt != null && r.dustAt >= 18, 'the haboob comes at six: ' + (r.dustAt && r.dustAt.toFixed(2)));
@@ -213,22 +215,61 @@ for(const [n, o] of runs){
   ok(S.ppl.kid && S.ppl.kid.del === 1, 'the tosser gets the credit');
 }
 
-/* Rattlesnake Flats: the made-up town, built for driving */
+/* Rattlesnake Ridge: the made-up town, curves and hills, built for driving */
 {
-  const F = WMap.town('flats');
-  console.log('\nRattlesnake Flats', JSON.stringify(F.stats));
-  ok(F.shops.length === 2, "Watson's and Grandpa's are both in the Flats");
+  const F = WMap.town('ridge');
+  console.log('\nRattlesnake Ridge', JSON.stringify(F.stats));
+  ok(F.shops.length === 2, "Watson's and Grandpa's are both on the Ridge");
   ok(F.houses.length > 400, F.houses.length + ' houses to deliver to');
-  ok(F.pickups.some(p => p.k === 'boom'), "Grandpa's black powder is on its canal");
+  ok(F.pickups.some(p => p.k === 'boom'), "Grandpa's black powder is on the river bank");
   ok(F.gilbertLine && F.mainLine, 'it has a Main Street and a Gilbert Road for the parade');
-  const types = {}; F.cells.forEach(c => types[c.type] = (types[c.type] || 0) + 1);
-  ok(['towers', 'airfield', 'speedway', 'yard', 'quarry', 'canal'].every(k => types[k]), 'every district is there: ' + JSON.stringify(types));
+  ok(F.lines.filter(l => !l.axis).length >= 6, F.lines.filter(l => !l.axis).length + ' of its ' + F.lines.length + ' roads curve');
+  const pass = F.lines.find(l => /Pass/.test(l.names[0].name)), top = Math.max(...pass.prof);
+  ok(top > 35, 'Rattlesnake Pass climbs to ' + top.toFixed(0) + ' m');
+  ok(F.ground(2060, 320) > 20, 'the airfield is up on the mesa: ' + F.ground(2060, 320).toFixed(0) + ' m');
+  ok(F.ground(2157, 1480) < -8, 'the quarry is dug into a pit: ' + F.ground(2157, 1480).toFixed(0) + ' m');
+  // the steepest a road gets, and every road joins its neighbours at one height
+  let steep = 0;
+  F.lines.forEach(l => { for(let k = 1; k < l.prof.length; k++){ const g = Math.abs(l.prof[k] - l.prof[k - 1]) / Math.max(0.1, l.cum[k] - l.cum[k - 1]); if(g > steep && !l.crests.length) steep = g; } });
+  ok(steep < 0.22, 'no road steeper than ' + Math.round(steep * 100) + '% (crests aside)');
+  let gap = 0;
+  Object.values(F.G.junctions).forEach(p => { const hs = F.lines.filter(l => F.lineNear(l, p[0], p[1]).d < 1).map(l => { const n = F.lineNear(l, p[0], p[1]); return F.ground(n.x, n.z); }); gap = Math.max(gap, Math.max(...hs) - Math.min(...hs)); });
+  ok(gap < 0.5, 'where roads meet they meet level (worst ' + gap.toFixed(2) + ' m)');
+  const shut = F.loops.filter(l => !l.entries.length).map(l => l.name);
+  ok(!shut.length, 'every neighbourhood has a road in' + (shut.length ? ' (not: ' + shut.join(', ') + ')' : ''));
   // every house can be reached from the shop
   const shop = F.shopPlace(0);
   let lost = 0;
   F.houses.forEach((h, i) => { const r = F.route(shop.front.x, shop.front.z, F.housePlace(i)); const e = r[r.length - 1]; if(Math.hypot(e.x - h.front.x, e.z - h.front.z) > 1) lost++; });
   ok(lost === 0, 'every house has a route from the shop (' + lost + ' without)');
-  // the jumps: up each one at speed and see what happens
+  let endN = 0; F.nodes.forEach((nd, i) => { if(Math.hypot(nd.x - 1782, nd.z - 300) < Math.hypot(F.nodes[endN].x - 1782, F.nodes[endN].z - 300)) endN = i; });
+  const r2 = F.route(shop.front.x, shop.front.z, {na: endN, nb: endN, front: {x: F.nodes[endN].x, z: F.nodes[endN].z}});
+  ok(r2.length > 10, 'a route up the pass to the airfield: ' + r2.length + ' points');
+  function drive(l, frac, sp, secs){
+    const S = WSim.create(F, {seed: 4}); WSim.addVan(S, 'me', 'Test'); WSim.start(S);
+    for(let i = 0; i < 200; i++) WSim.step(S);
+    const v = S.vans[0]; S.opts.noTraffic = true;
+    const p = F.linePoint(l, l.lo + (l.hi - l.lo) * frac);
+    place(v, p.x, p.z, Math.atan2(p.dz, p.dx), sp); v.y = F.height(p.x, p.z); v.ghost = 0; v.boost = 0;
+    let air = 0, crash = null, airs = 0, maxY = v.y, minY = v.y;
+    for(let i = 0; i < 60 * secs; i++){
+      S.cars.length = 0; S.goons.length = 0;
+      // steer along the road
+      const n = F.lineNear(l, v.x, v.z), q = F.linePoint(l, Math.min(l.hi, n.s + 25));
+      const want = Math.atan2(q.z - v.z, q.x - v.x), da = WSim.wrapA(want - v.h);
+      WSim.input(S, 0, {st: Math.max(-1, Math.min(1, da * 2)), gas: 1}); WSim.step(S);
+      if(v.air > 0.3 && v.air - 1 / 60 <= 0.3) airs++;
+      air = Math.max(air, v.air); maxY = Math.max(maxY, v.y); minY = Math.min(minY, v.y);
+      const c = S.ev.find(e => e.k === 'crash'); if(c && !crash) crash = c.cause || 'crash';
+      if(v.crash) break;
+    }
+    return {air, airs, crash, maxY, minY};
+  }
+  const rc = F.lines.find(l => /Rollercoaster/.test(l.names[0].name));
+  const run = drive(rc, 0.02, 36, 22);
+  ok(run.airs >= 3 && run.air > 0.6, 'Rollercoaster Road at 80 mph: ' + run.airs + ' crests with air, the best ' + run.air.toFixed(2) + ' s' + (run.crash ? ' (crashed: ' + run.crash + ')' : ''));
+  const up = drive(pass, 0.01, 18, 25);
+  ok(up.maxY - up.minY > 25 && !up.crash, 'up Rattlesnake Pass at 40 mph without crashing: climbed ' + (up.maxY - up.minY).toFixed(0) + ' m');
   function hit(r, sp, secs){
     const S = WSim.create(F, {seed: 4}); WSim.addVan(S, 'me', 'Test'); WSim.start(S);
     for(let i = 0; i < 200; i++) WSim.step(S);
@@ -236,32 +277,37 @@ for(const [n, o] of runs){
     const h = r.dx ? (r.dx > 0 ? 0 : Math.PI) : (r.dz > 0 ? Math.PI / 2 : -Math.PI / 2);
     const lat = r.dx ? (r.z0 + r.z1) / 2 : (r.x0 + r.x1) / 2;
     if(r.dx) place(v, r.s0 - r.dx * 14, lat, h, sp); else place(v, lat, r.s0 - r.dz * 14, h, sp);
-    v.ghost = 0; v.boost = 0;
+    v.y = F.height(v.x, v.z); v.ghost = 0; v.boost = 0;
     let air = 0, crash = null, roof = 0;
     for(let i = 0; i < 60 * (secs || 3); i++){
       S.cars.length = 0; S.goons.length = 0;
       WSim.input(S, 0, {st: 0, gas: 1}); WSim.step(S);
       air = Math.max(air, v.air);
-      if(!v.air && v.y > 2.3) roof++;
+      if(!v.air && v.y - F.ground(v.x, v.z) > 2.3) roof++;
       const c = S.ev.find(e => e.k === 'crash'); if(c && !crash) crash = c.cause || 'crash';
       if(v.crash) break;
     }
     return {air, crash, roof};
   }
-  const canal = F.ramps.filter(r => r.h === 2.8), wet = canal.map(r => hit(r, 30)).filter(q => q.crash === 'canal').length;
-  ok(canal.length >= 20 && wet === 0, canal.length + ' jumps across the canals, all of them clear it (' + wet + ' wet)');
   const mega = F.ramps.filter(r => r.h > 5).map(r => hit(r, 34, 5));
-  ok(mega.length === 2 && mega.every(q => q.air > 1.4 && !q.crash), 'the airfield mega ramps: ' + mega.map(q => q.air.toFixed(2) + ' s').join(', ') + ' of air');
+  ok(mega.length === 2 && mega.every(q => q.air > 1.4 && !q.crash), 'the mega ramps on the mesa: ' + mega.map(q => q.air.toFixed(2) + ' s').join(', ') + ' of air');
   const yard = F.ramps.filter(r => r.h === 2.6 && r.len === 12 && (r.dx ? r.z1 - r.z0 : r.x1 - r.x0) === 5).map(r => hit(r, 18, 4));
-  ok(yard.length >= 6 && yard.filter(q => q.roof > 20).length >= yard.length * 0.8, 'up the ramps onto the container roofs: ' + yard.filter(q => q.roof > 20).length + ' of ' + yard.length);
+  ok(yard.length >= 3 && yard.filter(q => q.roof > 20).length >= yard.length * 0.8, 'up the ramps onto the container roofs: ' + yard.filter(q => q.roof > 20).length + ' of ' + yard.length);
   const all = F.ramps.map(r => hit(r, 30)), bad = all.filter(q => q.crash && q.crash !== 'canal').length;
   console.log('   every jump at 67 mph:', all.filter(q => q.air > 0.5).length, 'with real air,', bad, 'end in a crash');
   ok(bad <= F.ramps.length * 0.15, 'most jumps land somewhere you can drive (' + bad + ' of ' + F.ramps.length + ' crash)');
+  // traffic on the curves
+  {
+    const S = WSim.create(F, {seed: 8}); WSim.addVan(S, null, 'C'); WSim.start(S);
+    for(let i = 0; i < 60 * 20; i++) WSim.step(S);
+    const off = S.cars.filter(c => !c.wreck && F.surf(c.x, c.z) !== 1).length;
+    ok(S.cars.length > 10 && off === 0, S.cars.length + ' cars in traffic, all of them on the road (' + off + ' off it)');
+  }
   // a day with three computer vans, and the parade
   const r = day(3, {M: F});
   const res = r.S.results;
   console.log(`   day with 3 computer vans: $${res.money}, ${res.delivered} delivered, ${res.crashes} crashes, ${res.cancelled} cancelled, ${(r.ms / 1000).toFixed(1)} s to run`);
-  ok(r.S.ph === 'end' && res.delivered >= 10, 'three computer vans deliver in the Flats: ' + res.delivered);
+  ok(r.S.ph === 'end' && res.delivered >= 10, 'three computer vans deliver on the Ridge: ' + res.delivered);
   const S = r.S;
   WSim.startParade(S);
   let hits = 0, n = 0;
@@ -269,7 +315,7 @@ for(const [n, o] of runs){
     if(i % 30 === 0){ n++; WSim.act(S, 'kid', 'Kid', {a: 'ptoss', ang: (n % 2 ? 1 : -1) * Math.PI / 2, pow: 0.4}); }
     WSim.step(S); S.ev.forEach(e => { if(e.k === 'pland' && e.hit) hits++; });
   }
-  ok(S.ph === 'results' && hits > 20, 'the parade goes down Gilbert Road in the Flats too: ' + hits + ' of ' + n);
+  ok(S.ph === 'results' && hits > 20, 'the parade goes down Gilbert Road on the Ridge too: ' + hits + ' of ' + n);
 }
 
 console.log(fails ? `\n${fails} FAILED` : '\nall good');

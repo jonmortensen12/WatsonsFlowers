@@ -24,7 +24,7 @@
 <canvas id="hud"></canvas>
 <div id="loading">Opening the shop...</div>
 <script src="geo.js"></script>
-<script src="flats.js"></script>
+<script src="ridge.js"></script>
 <script src="map.js"></script>
 <script src="sim.js"></script>
 <script src="net.js"></script>
@@ -833,6 +833,17 @@ function buildMap(r){
   g.scale(k, k); g.translate(-ms.x0 + ms.ox, -ms.y0 + ms.oy); g.scale(ms.s, ms.s);
   const s = ms.s;
   g.fillStyle = '#d8bf93'; g.fillRect(M.bounds.x0, M.bounds.z0, M.bounds.x1 - M.bounds.x0, M.bounds.z1 - M.bounds.z0);
+  if(M.free){
+    // the hills: shaded as if lit from the north-west, higher a little paler
+    const st = 8, gw = Math.ceil(M.W / st), gh = Math.ceil(M.H / st), hc = mkCanvas(gw, gh), hg = hc.getContext('2d'), im = hg.createImageData(gw, gh);
+    for(let j = 0; j < gh; j++) for(let i = 0; i < gw; i++){
+      const x = i * st, z = j * st, h = M.ground(x, z);
+      const sh = Math.max(-40, Math.min(40, (M.ground(x - st, z - st) - M.ground(x + st, z + st)) * 4)), lift = -Math.max(-20, Math.min(60, h)) * 0.45, o = (j * gw + i) * 4;
+      im.data[o] = Math.max(0, Math.min(255, 216 + lift + sh)); im.data[o + 1] = Math.max(0, Math.min(255, 191 + lift + sh)); im.data[o + 2] = Math.max(0, Math.min(255, 147 + lift * 0.8 + sh)); im.data[o + 3] = 255;
+    }
+    hg.putImageData(im, 0, 0);
+    g.imageSmoothingEnabled = true; g.drawImage(hc, 0, 0, gw * st, gh * st);
+  }
   M.cells.forEach(cl => {
     const col = {homes: '#b9c98f', grandpa: '#b9c98f', strip: '#c4cc9a', park: '#93bf6c', pondpark: '#93bf6c', riparian: '#8fbf7a', temple: '#a9d08a',
       grove: '#7fa45a', farm: '#c9b277', plaza: '#cfc7b8', downtown: '#c9b8a6', heritage: '#c9b8a6', campus: '#cfc7b8', school: '#c9c08f', watsons: '#f2c6cf',
@@ -856,7 +867,8 @@ function buildMap(r){
     g.strokeStyle = l.kind === 'fwy' ? '#e8b93a' : l.kind === 'art' ? '#5b5650' : '#7d776e';
     g.lineWidth = l.kind === 'fwy' ? 30 : l.kind === 'art' ? 20 : 12;
     g.beginPath();
-    if(l.axis === 'ns'){ g.moveTo(l.p, l.lo); g.lineTo(l.p, l.hi); } else { g.moveTo(l.lo, l.p); g.lineTo(l.hi, l.p); }
+    if(l.pts && M.free){ g.lineJoin = 'round'; l.pts.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); }
+    else if(l.axis === 'ns'){ g.moveTo(l.p, l.lo); g.lineTo(l.p, l.hi); } else { g.moveTo(l.lo, l.p); g.lineTo(l.hi, l.p); }
     g.stroke();
   });
   // street names along the arterials
@@ -864,6 +876,13 @@ function buildMap(r){
   const fs = Math.max(11, 13 / s) ;
   g.font = 'bold ' + fs + 'px system-ui, sans-serif';
   M.lines.filter(l => l.kind !== 'col').forEach(l => {
+    if(M.free){
+      // a curving road: its name once, along it, a third of the way
+      const s0 = l.lo + (l.hi - l.lo) * 0.3, p = M.linePoint(l, s0), n = M.lineName(l, s0);
+      let a = Math.atan2(p.dz, p.dx); if(a > Math.PI / 2) a -= Math.PI; if(a < -Math.PI / 2) a += Math.PI;
+      g.save(); g.translate(p.x, p.z); g.rotate(a); g.textAlign = 'center'; g.strokeStyle = 'rgba(0,0,0,0.5)'; g.lineWidth = 4; g.strokeText(n, 0, -fs * 0.9); g.fillText(n, 0, -fs * 0.9); g.restore();
+      return;
+    }
     if(l.axis === 'ew'){ g.textAlign = 'left'; const n = M.lineName(l, 0); g.lineWidth = 4; g.strokeStyle = 'rgba(0,0,0,0.5)'; g.strokeText(n, M.bounds.x0 + 40, l.p - fs * 0.9); g.fillText(n, M.bounds.x0 + 40, l.p - fs * 0.9); }
     else { [M.bounds.z0 + 30, (M.bounds.z0 + M.bounds.z1) / 2 + 200].forEach(z => { const n = M.lineName(l, z + 100); g.save(); g.translate(l.p + fs * 0.9, z); g.rotate(Math.PI / 2); g.textAlign = 'left'; g.strokeStyle = 'rgba(0,0,0,0.5)'; g.lineWidth = 4; g.strokeText(n, 0, 0); g.fillText(n, 0, 0); g.restore(); }); }
   });
@@ -914,7 +933,7 @@ function drawBoard(B, dt){
     const x = X(sh.x), y = Z(sh.z);
     H.fillStyle = '#f2a7b4'; H.beginPath(); H.arc(x, y, 11, 0, Math.PI * 2); H.fill(); H.strokeStyle = '#fff'; H.lineWidth = 3; H.stroke();
     H.fillStyle = '#7a1f3a'; H.font = 'bold 12px Georgia'; H.textAlign = 'center'; H.textBaseline = 'middle'; H.fillText('W', x, y + 1);
-    mapLabel(sh.key === 'watsons' ? (M.key === 'flats' ? "Watson's" : "Watson's - 2525 W Main") : (M.key === 'flats' ? "Grandpa's" : "Grandpa's - 122 E Palo Verde"), x, y + 22, '#f7cfd6', 12);
+    mapLabel(sh.key === 'watsons' ? (M.key !== 'mesa' ? "Watson's" : "Watson's - 2525 W Main") : (M.key !== 'mesa' ? "Grandpa's" : "Grandpa's - 122 E Palo Verde"), x, y + 22, '#f7cfd6', 12);
   });
   // goons
   S.goons.forEach(g => {

@@ -637,6 +637,7 @@ function collideStatic(S, v, ox, oz){
   var M = S.M;
   var fx = Math.cos(v.h), fz = Math.sin(v.h);
   var near = M.near(v.x, v.z, 5, scratch);
+  var vg = v.y - M.ground(v.x, v.z);   // how high off the bare ground
   stampN++; if(stampN > 4e9) stampN = 1;
   var worst = null;
   for(var c = -1; c <= 1; c += 2){
@@ -645,7 +646,7 @@ function collideStatic(S, v, ox, oz){
     for(k = 0; k < near.b.length; k++){
       var bi = near.b[k];
       b = M.boxes[bi];
-      if(v.y > b.h - (b.deck ? 0.7 : 0.15)) continue;   // a roof you can drive on: the nose may reach it first
+      if(v.y > (b.gy || 0) + b.h - (b.deck ? 0.7 : 0.15)) continue;   // a roof you can drive on: the nose may reach it first
       if(b.k === 'wall' && S.wallsDown[bi]) continue;
       px = cx < b.x0 ? b.x0 : cx > b.x1 ? b.x1 : cx;
       pz = cz < b.z0 ? b.z0 : cz > b.z1 ? b.z1 : cz;
@@ -672,7 +673,7 @@ function collideStatic(S, v, ox, oz){
     }
     for(k = 0; k < near.c.length; k++){
       var ci = M.circles[near.c[k]];
-      if(v.y > ci.h - 0.15) continue;
+      if(vg > ci.h - 0.15) continue;
       dx = cx - ci.x; dz = cz - ci.z; d2 = dx * dx + dz * dz;
       var rs = r + ci.r;
       if(d2 >= rs * rs || d2 < 1e-8) continue;
@@ -683,7 +684,7 @@ function collideStatic(S, v, ox, oz){
     }
     for(k = 0; k < near.p.length; k++){
       var pi = near.p[k], pr = M.props[pi];
-      if(S.broken[pi] || v.y > 1.6) continue;
+      if(S.broken[pi] || vg > 1.6) continue;
       dx = cx - pr.x; dz = cz - pr.z;
       if(dx * dx + dz * dz > (r + pr.r) * (r + pr.r)) continue;
       if(v.spd < 2.5){ var dd = Math.hypot(dx, dz) || 1; v.x += dx / dd * 0.05; v.z += dz / dd * 0.05; continue; }
@@ -766,7 +767,7 @@ function crashTick(S, v){
   c.vy -= G * DT;
   c.x += c.vx * DT; c.z += c.vz * DT; c.y += c.vy * DT;
   var g = M.height(c.x, c.z);
-  if(c.cause === 'canal'){ g = Math.max(g, -2.4); c.vy = Math.max(c.vy, -3); c.vx *= 0.97; c.vz *= 0.97; }
+  if(c.cause === 'canal'){ g = Math.max(g, M.ground(c.x, c.z) - 2.4); c.vy = Math.max(c.vy, -3); c.vx *= 0.97; c.vz *= 0.97; }
   if(c.y < g){
     c.y = g;
     if(c.vy < -3){ c.vy = -c.vy * 0.35; c.wx *= 0.6; c.wz *= 0.6; emit(S, {k: 'thud', v: v.i, x: c.x, z: c.z}); }
@@ -799,7 +800,7 @@ function respawn(S, v){
   var tgt = targetPoint(S, v);
   var h = spot.h;
   if(tgt){ var want = Math.atan2(tgt.z - spot.z, tgt.x - spot.x); if(Math.abs(wrapA(want - h)) > Math.PI / 2) h += Math.PI; }
-  v.x = spot.x; v.z = spot.z; v.y = 0; v.vy = 0; v.h = h; v.vx = v.vz = 0; v.yaw = 0;
+  v.x = spot.x; v.z = spot.z; v.y = M.height(spot.x, spot.z); v.vy = 0; v.h = h; v.vx = v.vz = 0; v.yaw = 0;
   v.crash = null; v.ghost = 2.2; v.air = 0; v.powder = 0; v.routeT = 0; v.drift = 0;
   if((v.dmg || 0) > 0.3) v.dmg = 0.3;
   emit(S, {k: 'respawn', v: v.i});
@@ -866,6 +867,13 @@ function aiDrive(S, v){
   var vf = v.vx * fx + v.vz * fz;
   // a point a little way down the route
   var look = 7 + 0.32 * spd, px = v.x, pz = v.z, rem = look, i = v.wp, lx = v.x, lz = v.z, sdx = fx, sdz = fz;
+  // measure the look-ahead from the route itself, not from wherever the van
+  // has wandered to: off the line, it steers back onto it
+  if(v.wp > 0 && v.wp < v.route.length){
+    var A0 = v.route[v.wp - 1], B0 = v.route[v.wp], ex0 = B0.x - A0.x, ez0 = B0.z - A0.z, L20 = ex0 * ex0 + ez0 * ez0;
+    if(L20 > 1){ var t0 = Math.max(0, Math.min(1, ((v.x - A0.x) * ex0 + (v.z - A0.z) * ez0) / L20)), qx0 = A0.x + ex0 * t0, qz0 = A0.z + ez0 * t0;
+      if(Math.hypot(v.x - qx0, v.z - qz0) > 3.5){ lx = qx0; lz = qz0; px = lx; pz = lz; } }
+  }
   while(i < v.route.length){
     var p = v.route[i];
     var seg = Math.hypot(p.x - lx, p.z - lz);
@@ -881,9 +889,14 @@ function aiDrive(S, v){
   var st = Math.max(-1, Math.min(1, diff * 2.4));
   // the next real corner, and how fast to take it
   var dist = Math.hypot(v.route[v.wp].x - v.x, v.route[v.wp].z - v.z), vt = 36, k;
+  // a curve is many small bends: add them up over the next 60 m
+  var bendAcc = 0, bendFrom = dist;
   for(k = v.wp; k < v.route.length - 1 && dist < 220; k++){
     var a = v.route[k], b = v.route[k + 1], pr = k > 0 ? v.route[k - 1] : {x: v.x, z: v.z};
     var ang = Math.abs(wrapA(Math.atan2(b.z - a.z, b.x - a.x) - Math.atan2(a.z - pr.z, a.x - pr.x)));
+    if(dist - bendFrom > 60){ bendAcc = 0; bendFrom = dist; }
+    bendAcc += ang;
+    if(ang <= 0.4 && bendAcc > 0.5) ang = bendAcc;
     if(ang > 0.4){
       var vTurn = 10 + (1 - Math.min(1, ang / 1.57)) * 14;
       vt = Math.min(vt, Math.sqrt(vTurn * vTurn + 2 * 15 * Math.max(0, dist - 8)));
@@ -896,6 +909,9 @@ function aiDrive(S, v){
   if(v.tgt && v.tgt.k === 'shop') vt = Math.min(vt, 5 + dEnd * 0.35);
   if(v.tgt && v.tgt.k === 'house') vt = Math.min(vt, 9 + dEnd * 0.4);
   if(Math.abs(diff) > 0.9) vt = Math.min(vt, 9);
+  // a narrow street (road surface gone within 5 m either side): steady on
+  var M0 = S.M;
+  if(M0.free && (M0.surf(v.x - fz * 5, v.z + fx * 5) !== 1 || M0.surf(v.x + fz * 5, v.z - fx * 5) !== 1)) vt = Math.min(vt, 19);
   // traffic ahead, and anything about to cross our path
   for(k = 0; k < S.cars.length; k++){
     var c = S.cars[k];
@@ -1004,23 +1020,24 @@ function vanStops(S, v){
 /* ---------------- traffic ---------------- */
 var CAR_KINDS = [{k: 'car', L: 4.6, W: 2.0, p: 0.72}, {k: 'pickup', L: 5.4, W: 2.1, p: 0.14}, {k: 'truck', L: 7.5, W: 2.5, p: 0.07}, {k: 'bus', L: 11, W: 2.6, p: 0.07}];
 function carPos(S, c){
-  var l = S.M.lines[c.l];
-  var off = S.M.laneOffsets(l)[c.lane];
-  if(l.axis === 'ns'){ c.x = l.p - c.dir * off; c.z = c.s; c.h = c.dir > 0 ? Math.PI / 2 : -Math.PI / 2; }
-  else { c.x = c.s; c.z = l.p + c.dir * off; c.h = c.dir > 0 ? 0 : Math.PI; }
+  var M = S.M, l = M.lines[c.l];
+  var off = M.laneOffsets(l)[c.lane] * c.dir, p = M.linePoint(l, c.s);
+  c.x = p.x - p.dz * off; c.z = p.z + p.dx * off;
+  c.h = Math.atan2(p.dz * c.dir, p.dx * c.dir);
+  c.y = M.free ? M.ground(c.x, c.z) : 0;
 }
 function spawnCar(S){
   var M = S.M, R = S.R;
   var vs = S.vans.filter(function(v){ return !v.crash; });
   if(!vs.length) return;
   var v = vs[Math.floor(R() * vs.length)];
-  var cand = M.lines.filter(function(l){ return Math.abs((l.axis === 'ns' ? v.x : v.z) - l.p) < 280; });
+  var cand = [];
+  M.lines.forEach(function(q){ var nq = M.lineNear(q, v.x, v.z); if(nq.d < 280) cand.push([q, nq]); });
   if(!cand.length) return;
-  var l = cand[Math.floor(R() * cand.length)];
-  var along = l.axis === 'ns' ? v.z : v.x;
-  var s = along + (R() < 0.5 ? -1 : 1) * (90 + R() * 230);
+  var pick = cand[Math.floor(R() * cand.length)], l = pick[0], nr = pick[1];
+  var s = nr.s + (R() < 0.5 ? -1 : 1) * (90 + R() * 230);
   if(s < l.lo + 5 || s > l.hi - 5) return;
-  var x = l.axis === 'ns' ? l.p : s, z = l.axis === 'ns' ? s : l.p;
+  var pt = M.linePoint(l, s), x = pt.x, z = pt.z;
   for(var k = 0; k < S.vans.length; k++) if(Math.hypot(S.vans[k].x - x, S.vans[k].z - z) < 85) return;
   var lanes = M.laneOffsets(l);
   var r = R(), kind = CAR_KINDS[0];
@@ -1029,18 +1046,23 @@ function spawnCar(S){
   var c = {id: S.carId++, l: l.id, dir: R() < 0.5 ? 1 : -1, lane: Math.floor(R() * lanes.length), s: s,
     kind: kind.k, L: kind.L, W: kind.W, vmax: M.speedLimit(l) * (0.85 + R() * 0.3), v: 0, color: Math.floor(R() * 10), nm: 0, wreck: null};
   c.v = c.vmax * 0.8;
+  // no queue of cars: a few to a stretch of road (a town with few roads near
+  // the vans would otherwise pile all its traffic onto them)
+  var crowd = 0;
   for(var j = 0; j < S.cars.length; j++){
     var o = S.cars[j];
     if(o.l === c.l && o.dir === c.dir && o.lane === c.lane && Math.abs(o.s - c.s) < 14) return;
+    if(o.l === c.l && Math.abs(o.s - c.s) < 220) crowd++;
   }
+  if(crowd >= 4 * lanes.length) return;
   carPos(S, c);
   S.cars.push(c);
 }
 
-function sigGreen(S, L, axis){
+function sigGreen(S, L, lineId){
   if(!L.sig) return true;
   var t = (S.t + L.off) % 16;
-  if(axis === 'ns') return t < 7;
+  if(lineId === L.a) return t < 7;
   return t >= 8 && t < 15;
 }
 
@@ -1061,16 +1083,17 @@ function trafficTick(S){
     if(c.wreck){
       var w = c.wreck;
       w.t += DT; w.vy -= G * DT; w.y += w.vy * DT;
-      if(w.y < 0){
-        w.y = 0;
+      var wg = M.free ? M.ground(c.x, c.z) : 0;
+      if(w.y < wg){
+        w.y = wg;
         if(w.vy < -3){ w.vy = -w.vy * 0.45; emit(S, {k: 'carbounce', x: c.x, z: c.z}); } else w.vy = 0;
       }
       var sp = Math.hypot(w.vx, w.vz);
-      if(sp > 0 && w.y <= 0.01){ var f = Math.max(0, sp - 6 * DT) / sp; w.vx *= f; w.vz *= f; }
+      if(sp > 0 && w.y <= wg + 0.01){ var f = Math.max(0, sp - 6 * DT) / sp; w.vx *= f; w.vz *= f; }
       c.x += w.vx * DT; c.z += w.vz * DT;
       w.ax += w.wx * DT; w.ay += w.wy * DT; w.az += w.wz * DT;
       // on the ground it keeps rolling while it is still moving, then settles
-      if(w.y <= 0.01){ var roll = sp > 3 ? 0.992 : 0.9; w.wx *= roll; w.wz *= roll; w.wy *= 0.95; }
+      if(w.y <= wg + 0.01){ var roll = sp > 3 ? 0.992 : 0.9; w.wx *= roll; w.wz *= roll; w.wy *= 0.95; }
       if(w.t > 14) S.cars.splice(i, 1);
       continue;
     }
@@ -1088,9 +1111,9 @@ function trafficTick(S){
       var at = l.nodes[n].at;
       var ahead = (at - c.s) * c.dir;
       if(ahead < 6 || ahead > 60) continue;
-      var L = M.lights.filter(function(q){ return (l.axis === 'ns' ? q.x === l.p : q.z === l.p) && (l.axis === 'ns' ? q.z === at : q.x === at); })[0];
+      var L = l.nodes[n].L;
       if(!L) continue;
-      if(!sigGreen(S, L, l.axis)){
+      if(!sigGreen(S, L, l.id)){
         var stop = ahead - 15 - c.L / 2;
         vt = Math.min(vt, stop > 0 ? Math.sqrt(2 * 5 * stop) : 0);
       }
@@ -1118,7 +1141,7 @@ function vanVsCars(S, v){
     var c = S.cars[i];
     var dx0 = c.x - v.x, dz0 = c.z - v.z;
     if(dx0 * dx0 + dz0 * dz0 > 100) continue;
-    if(Math.abs(v.y - (c.wreck ? c.wreck.y : 0)) > 2.2) continue;
+    if(Math.abs(v.y - (c.wreck ? c.wreck.y : c.y != null ? c.y : S.M.ground(c.x, c.z))) > 2.2) continue;
     var cx = Math.cos(c.h), cz = Math.sin(c.h);
     var cvx = c.wreck ? c.wreck.vx : cx * c.v, cvz = c.wreck ? c.wreck.vz : cz * c.v;
     var hit = null;
@@ -1173,7 +1196,7 @@ function wreckCar(S, c, v, imp){
   var cx = Math.cos(c.h), cz = Math.sin(c.h);
   // up, over and rolling: a hard hit throws the car end over end
   var big = Math.min(1, imp / 35);
-  c.wreck = {t: 0, y: 0.2, vy: Math.min(20, 4 + imp * 0.42), vx: cx * c.v * 0.4 + v.vx * 0.95, vz: cz * c.v * 0.4 + v.vz * 0.95,
+  c.wreck = {t: 0, y: (c.y || 0) + 0.2, vy: Math.min(20, 4 + imp * 0.42), vx: cx * c.v * 0.4 + v.vx * 0.95, vz: cz * c.v * 0.4 + v.vz * 0.95,
     ax: 0, ay: 0, az: 0, wx: (R() < 0.5 ? -1 : 1) * (3 + imp * 0.35 * (0.6 + R() * 0.6)), wy: (R() - 0.5) * imp * 0.25,
     wz: (R() < 0.5 ? -1 : 1) * (2 + imp * 0.3 * R()), boom: imp > 30 && R() < 0.45};
   emit(S, {k: 'carhit', id: c.id, x: c.x, z: c.z, imp: imp, vx: c.wreck.vx, vz: c.wreck.vz, boom: c.wreck.boom, big: big});
@@ -1284,7 +1307,7 @@ function goonTick(S){
     // hit by a van
     for(var j = 0; j < S.vans.length; j++){
       var v2 = S.vans[j];
-      if(v2.crash || Math.abs(v2.y) > 2) continue;
+      if(v2.crash || v2.y - S.M.ground(v2.x, v2.z) > 2) continue;
       var ddx = g.x - v2.x, ddz = g.z - v2.z, dd = Math.hypot(ddx, ddz);
       if(dd < 2.3 && v2.spd > 5){
         g.st = 'flung'; g.t = 0;

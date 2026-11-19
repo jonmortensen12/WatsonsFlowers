@@ -96,6 +96,9 @@ const KINDS = ['car', 'pickup', 'truck', 'bus'];
 
 export function createView(scene, M, opts){
   opts = opts || {};
+  // the ground under a point (0 everywhere in a flat town)
+  const GY = M.free ? M.ground : () => 0;
+  let YO = 0;   // added to the heights an event gives, when it gives none of its own
   const V = {scene, M, vans: [], petMax: opts.petals || 5000};
 
   /* ---- vans ---- */
@@ -148,7 +151,8 @@ export function createView(scene, M, opts){
     if(s.crash) o.grp.rotation.set(s.crash.ax || 0, -(s.crash.h != null ? s.crash.h : s.h) + (s.crash.ay || 0), s.crash.az || 0, 'YXZ');
     else {
       const lean = -(s.yaw || 0) * Math.min(1, (s.spd || 0) / 30) * 0.06 * (s.drift ? 2 : 1);
-      const pitch = s.air ? Math.max(-0.4, Math.min(0.3, (s.vy || 0) * 0.03)) : 0;
+      let pitch = s.air ? Math.max(-0.4, Math.min(0.3, (s.vy || 0) * 0.03)) : 0;
+      if(!s.air && M.free){ const fx = Math.cos(s.h), fz = Math.sin(s.h); pitch = Math.atan2(M.height(s.x + fx * 2, s.z + fz * 2) - M.height(s.x - fx * 2, s.z - fz * 2), 4); }
       o.grp.rotation.set(lean, -s.h, pitch, 'YXZ');
     }
     o.wheels.forEach(w => { w.rotation.z -= (s.spd || 0) * dt / 0.42; });
@@ -165,7 +169,7 @@ export function createView(scene, M, opts){
   V.target = function(i, tp, t){
     const o = V.vans[i]; if(!o) return;
     o.mark.visible = !!tp;
-    if(tp){ o.mark.position.set(tp.x, 0, tp.z); o.mark.children[1].scale.setScalar(1 + 0.15 * Math.sin(t * 6)); }
+    if(tp){ o.mark.position.set(tp.x, GY(tp.x, tp.z), tp.z); o.mark.children[1].scale.setScalar(1 + 0.15 * Math.sin(t * 6)); }
   };
   V.route = function(i, r){
     const o = V.vans[i]; if(!o) return;
@@ -177,7 +181,8 @@ export function createView(scene, M, opts){
     for(let k = 0; k < r.length - 1; k++){
       const a = r[k], b = r[k + 1], L = Math.hypot(b.x - a.x, b.z - a.z); if(L < 0.1) continue;
       const nx = -(b.z - a.z) / L * 0.9, nz = (b.x - a.x) / L * 0.9, base = pos.length / 3;
-      pos.push(a.x + nx, 0.2, a.z + nz, b.x + nx, 0.2, b.z + nz, b.x - nx, 0.2, b.z - nz, a.x - nx, 0.2, a.z - nz);
+      const ya = GY(a.x, a.z) + 0.25, yb = GY(b.x, b.z) + 0.25;
+      pos.push(a.x + nx, ya, a.z + nz, b.x + nx, yb, b.z + nz, b.x - nx, yb, b.z - nz, a.x - nx, ya, a.z - nz);
       idx.push(base, base + 2, base + 1, base, base + 3, base + 2);
     }
     o.ribbon.geometry.dispose();
@@ -196,6 +201,11 @@ export function createView(scene, M, opts){
       const k = typeof c.kind === 'number' ? KINDS[c.kind] : c.kind, im = traffic[k]; if(!im) return;
       const i = n[k]++; if(i >= 160) return;
       if(c.wreck){ _e.set(c.wreck.ax, -c.h + c.wreck.ay, c.wreck.az, 'YXZ'); _p.set(c.x, c.wreck.y, c.z); }
+      else if(M.free){
+        const fx = Math.cos(c.h), fz = Math.sin(c.h), hl = (c.L || 4.6) / 2;
+        const tilt = Math.atan2(GY(c.x + fx * hl, c.z + fz * hl) - GY(c.x - fx * hl, c.z - fz * hl), hl * 2);
+        _e.set(0, -c.h, tilt, 'YXZ'); _p.set(c.x, c.y != null ? c.y : GY(c.x, c.z), c.z);
+      }
       else { _e.set(0, -c.h, 0); _p.set(c.x, 0, c.z); }
       _q.setFromEuler(_e); _s.set(1, 1, 1); _m.compose(_p, _q, _s);
       im.setMatrixAt(i, _m);
@@ -267,11 +277,11 @@ export function createView(scene, M, opts){
   V.addShot = function(e){
     const m = bouquetSprite(e.ri);
     scene.add(m);
-    flying.push({m, x0: e.x, z0: e.z, tx: e.tx, tz: e.tz, T: e.T, t: 0, y0: e.y0 || 2.2});
+    flying.push({m, x0: e.x, z0: e.z, tx: e.tx, tz: e.tz, T: e.T, t: 0, y0: e.y0 || 2.2, g0: GY(e.x, e.z), g1: GY(e.tx, e.tz)});
   };
   V.leaveOnPorch = function(x, z, ri){
     const m = bouquetSprite(ri, 0.8);
-    m.position.set(x, 0.05, z);
+    m.position.set(x, 0.05 + GY(x, z), z);
     scene.add(m); porches.push({m, t: 40});
     if(porches.length > 40){ scene.remove(porches[0].m); porches.shift(); }
   };
@@ -279,7 +289,7 @@ export function createView(scene, M, opts){
     for(let i = flying.length - 1; i >= 0; i--){
       const f = flying[i]; f.t += dt;
       const u = Math.min(1, f.t / f.T);
-      const y = f.y0 * (1 - u) + 0.3 * u + Math.sin(u * Math.PI) * (3 + f.T * 2.5);
+      const y = f.y0 * (1 - u) + 0.3 * u + Math.sin(u * Math.PI) * (3 + f.T * 2.5) + f.g0 * (1 - u) + f.g1 * u;
       f.m.position.set(f.x0 + (f.tx - f.x0) * u, y, f.z0 + (f.tz - f.z0) * u);
       f.m.material.rotation = u * 9;
       if(u >= 1){ scene.remove(f.m); flying.splice(i, 1); }
@@ -293,6 +303,7 @@ export function createView(scene, M, opts){
   petals.count = 0; petals.frustumCulled = false; petals.setColorAt(0, new THREE.Color('#fff')); scene.add(petals);
   const P = [];
   V.burst = function(x, y, z, vx, vz, n, colors, spread){
+    y += YO;
     for(let i = 0; i < n; i++){
       if(P.length >= PET_MAX) P.shift();
       const a = Math.random() * Math.PI * 2, sp = Math.random() * (spread || 9);
@@ -313,13 +324,14 @@ export function createView(scene, M, opts){
     for(let i = P.length - 1; i >= 0; i--){
       const p = P[i]; p.life -= dt;
       if(p.life <= 0){ P.splice(i, 1); continue; }
-      if(p.y > 0.05){
+      const pf = M.free ? GY(p.x, p.z) + 0.05 : 0.05;
+      if(p.y > pf){
         p.vy -= 9 * dt;
         const drag = Math.exp(-1.6 * dt);
         p.vx = p.vx * drag + wind.x * dt; p.vz = p.vz * drag + wind.z * dt;
         if(p.vy < -2.5) p.vy = -2.5;
         p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt; p.rx += p.wx * dt; p.ry += p.wy * dt;
-        if(p.y <= 0.05){ p.y = 0.05; p.rx = Math.PI / 2; }
+        if(p.y <= pf){ p.y = pf; p.rx = Math.PI / 2; }
       }
     }
     let n = 0;
@@ -335,6 +347,7 @@ export function createView(scene, M, opts){
   smoke.count = 0; smoke.frustumCulled = false; smoke.setColorAt(0, new THREE.Color('#fff')); scene.add(smoke);
   const SM = [];
   V.puff = function(x, y, z, n, color, size, up){
+    y += YO;
     for(let i = 0; i < n; i++){
       if(SM.length >= SM_MAX) SM.shift();
       SM.push({x: x + (Math.random() - 0.5) * 2, y: y + Math.random(), z: z + (Math.random() - 0.5) * 2, vx: (Math.random() - 0.5) * 3, vy: (up || 1.5) * (0.5 + Math.random()), vz: (Math.random() - 0.5) * 3,
@@ -353,6 +366,7 @@ export function createView(scene, M, opts){
   chunks.count = 0; chunks.frustumCulled = false; chunks.setColorAt(0, new THREE.Color('#fff')); scene.add(chunks);
   const CH = [];
   V.chunks = function(x, y, z, vx, vz, n, colors, size, spread, up){
+    y += YO;
     for(let i = 0; i < n; i++){
       if(CH.length >= CH_MAX) CH.shift();
       const a = Math.random() * Math.PI * 2, sp = Math.random() * (spread || 6);
@@ -368,9 +382,10 @@ export function createView(scene, M, opts){
     for(let i = CH.length - 1; i >= 0; i--){
       const p = CH[i]; p.life -= dt;
       if(p.life <= 0){ CH.splice(i, 1); continue; }
-      if(p.y > p.sy / 2 || p.vy > 0){
+      const cf = p.sy / 2 + (M.free ? GY(p.x, p.z) : 0);
+      if(p.y > cf || p.vy > 0){
         p.vy -= 22 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt; p.rx += p.wx * dt; p.ry += p.wy * dt;
-        if(p.y < p.sy / 2){ p.y = p.sy / 2; if(p.vy < -3){ p.vy = -p.vy * 0.3; p.vx *= 0.6; p.vz *= 0.6; p.wx *= 0.5; } else { p.vy = 0; p.vx = p.vz = 0; p.rx = Math.round(p.rx / Math.PI) * Math.PI; } }
+        if(p.y < cf){ p.y = cf; if(p.vy < -3){ p.vy = -p.vy * 0.3; p.vx *= 0.6; p.vz *= 0.6; p.wx *= 0.5; } else { p.vy = 0; p.vx = p.vz = 0; p.rx = Math.round(p.rx / Math.PI) * Math.PI; } }
       }
     }
     for(let i = 0; i < CH.length; i++){
@@ -385,6 +400,7 @@ export function createView(scene, M, opts){
 
   const booms = [];
   V.fireball = function(x, y, z, size, color){
+    y += YO;
     const m = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({color: color || '#ffa63a', transparent: true, opacity: 0.95}));
     m.position.set(x, y, z); scene.add(m);
     booms.push({m, t: 0, T: 0.9, size: size || 6});
@@ -418,6 +434,10 @@ export function createView(scene, M, opts){
 
   /* ---- what an event looks like (both screens) ---- */
   V.event = function(e, flowers){
+    YO = M.free && e.y == null && e.x != null ? GY(e.x, e.z) : 0;
+    try { eventFx(e, flowers); } finally { YO = 0; }
+  };
+  function eventFx(e, flowers){
     switch(e.k){
       case 'crash':
         V.burst(e.x, (e.y || 0) + 1.5, e.z, e.vx || 0, e.vz || 0, 220 + (e.lost ? e.lost.length : 0) * 120, e.lost && e.lost.length ? V.flowerColors(e.lost) : ['#e8e8e8', '#cccccc', '#f2a7b4'], 10);

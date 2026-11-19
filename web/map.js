@@ -50,11 +50,20 @@ function build(G, seed){
   var R = rng(seed || 1927);
   var M = {G: G, SURF: SURF, RES: RES, seed: seed || 1927};
 
+  /* A town is either the mile-road grid (Mesa: straight lines north-south
+     and east-west, G.ns/G.ew) or free (G.roads: curves through control
+     points, joined at named junctions, over hills from G.terrain). Every
+     road is a "line" either way: a straight one has an axis and a fixed p;
+     a curved one has pts, sampled every few metres. Positions along a line
+     are s: the x or z for a straight line, metres along it for a curve. */
+  var FREE = !!G.roads;
+  M.free = FREE;
+
   /* ---------------- the grid lines ---------------- */
-  var fNS = G.fwy.filter(function(f){ return f.axis === 'ns'; })[0];
-  var fEW = G.fwy.filter(function(f){ return f.axis === 'ew'; })[0];
-  var X0 = fNS.x - W_FWY / 2 - 4, X1 = G.ns[G.ns.length - 1].x + 85;
-  var Z0 = G.ew[0].z - 68, Z1 = G.ew[G.ew.length - 1].z + 68;
+  var fNS = FREE ? null : G.fwy.filter(function(f){ return f.axis === 'ns'; })[0];
+  var fEW = FREE ? null : G.fwy.filter(function(f){ return f.axis === 'ew'; })[0];
+  var X0 = FREE ? 0 : fNS.x - W_FWY / 2 - 4, X1 = FREE ? G.size[0] : G.ns[G.ns.length - 1].x + 85;
+  var Z0 = FREE ? 0 : G.ew[0].z - 68, Z1 = FREE ? G.size[1] : G.ew[G.ew.length - 1].z + 68;
   M.bounds = {x0: X0, x1: X1, z0: Z0, z1: Z1};
   M.W = X1; M.H = Z1;
 
@@ -66,6 +75,7 @@ function build(G, seed){
     lines.push(l);
     return l;
   }
+  if(!FREE){
   addLine('ns', fNS.x, 'fwy', [{name: fNS.name, cut: null}]);
   G.ns.forEach(function(a, i){
     addLine('ns', a.x, 'art', a.names.map(function(n){ return {name: n.name, cut: n.z}; }));
@@ -81,7 +91,78 @@ function build(G, seed){
       else if(G.ew[i + 1].z - a.z > 250 && (G.ewCol ? G.ewCol[i] : true)) addLine('ew', mid, 'col', [{name: G.ewCol ? G.ewCol[i] : EW_COLLECTORS[i % EW_COLLECTORS.length], cut: null}]);
     }
   });
+  } else freeLines();
   M.lines = lines;
+
+  /* ---- curves: a Catmull-Rom spline through the control points ---- */
+  function freeLines(){
+    function cr(a, b, c, d, t){
+      var t2 = t * t, t3 = t2 * t;
+      return [0.5 * (2 * b[0] + (-a[0] + c[0]) * t + (2 * a[0] - 5 * b[0] + 4 * c[0] - d[0]) * t2 + (-a[0] + 3 * b[0] - 3 * c[0] + d[0]) * t3),
+              0.5 * (2 * b[1] + (-a[1] + c[1]) * t + (2 * a[1] - 5 * b[1] + 4 * c[1] - d[1]) * t2 + (-a[1] + 3 * b[1] - 3 * c[1] + d[1]) * t3)];
+    }
+    G.roads.forEach(function(rd){
+      var P = rd.pts.map(function(p){ return typeof p === 'string' ? G.junctions[p] : p; });
+      var jn = rd.pts.map(function(p){ return typeof p === 'string' ? p : null; });
+      var kind = rd.kind || 'art';
+      var w = kind === 'fwy' ? W_FWY : kind === 'art' ? W_ART : W_COL;
+      var l = {id: lines.length, kind: kind, w: w, names: [{name: rd.name, cut: null}], nodes: [], junc: [], crests: rd.crests || []};
+      var allX = P.every(function(p){ return p[0] === P[0][0]; }), allZ = P.every(function(p){ return p[1] === P[0][1]; });
+      if(allX || allZ){
+        // straight: the grid kind of line
+        l.axis = allX ? 'ns' : 'ew'; l.p = allX ? P[0][0] : P[0][1];
+        var cs = P.map(function(p){ return allX ? p[1] : p[0]; });
+        l.lo = Math.min.apply(null, cs); l.hi = Math.max.apply(null, cs);
+        P.forEach(function(p, k){ if(jn[k]) l.junc.push({j: jn[k], at: allX ? p[1] : p[0]}); });
+        var n = Math.ceil((l.hi - l.lo) / 4);
+        l.pts = []; for(var q = 0; q <= n; q++){ var a = l.lo + (l.hi - l.lo) * q / n; l.pts.push(allX ? [l.p, a] : [a, l.p]); }
+      } else {
+        var pts = [], marks = [];
+        for(var k = 0; k < P.length - 1; k++){
+          var p0 = P[k - 1] || P[k], p1 = P[k], p2 = P[k + 1], p3 = P[k + 2] || P[k + 1];
+          var m = Math.max(1, Math.ceil(Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / 4));
+          marks.push(pts.length);
+          for(var i = 0; i < m; i++) pts.push(cr(p0, p1, p2, p3, i / m));
+        }
+        marks.push(pts.length); pts.push(P[P.length - 1].slice());
+        l.axis = null; l.pts = pts;
+        P.forEach(function(p, k){ if(jn[k]) l.junc.push({j: jn[k], idx: marks[k]}); });
+      }
+      // lengths along it
+      var cum = [0];
+      for(var q2 = 1; q2 < l.pts.length; q2++) cum.push(cum[q2 - 1] + Math.hypot(l.pts[q2][0] - l.pts[q2 - 1][0], l.pts[q2][1] - l.pts[q2 - 1][1]));
+      l.cum = cum; l.len = cum[cum.length - 1];
+      if(!l.axis){ l.lo = 0; l.hi = l.len; l.junc.forEach(function(j){ j.at = cum[j.idx]; }); }
+      lines.push(l);
+    });
+  }
+  /* where a line is at s: the point and the way it runs */
+  M.linePoint = function(l, s){
+    if(l.axis === 'ns') return {x: l.p, z: s, dx: 0, dz: 1};
+    if(l.axis === 'ew') return {x: s, z: l.p, dx: 1, dz: 0};
+    var c = l.cum, lo = 0, hi = c.length - 1;
+    if(s <= 0) lo = 0; else if(s >= l.len) lo = hi - 1;
+    else { while(hi - lo > 1){ var mid = (lo + hi) >> 1; if(c[mid] <= s) lo = mid; else hi = mid; } }
+    var a = l.pts[lo], b = l.pts[lo + 1], L = (c[lo + 1] - c[lo]) || 1, t = Math.max(0, Math.min(1, (s - c[lo]) / L));
+    return {x: a[0] + (b[0] - a[0]) * t, z: a[1] + (b[1] - a[1]) * t, dx: (b[0] - a[0]) / L, dz: (b[1] - a[1]) / L};
+  };
+  /* the nearest point of a line to (x, z): {s, d, x, z} */
+  M.lineNear = function(l, x, z){
+    if(l.axis === 'ns'){ var sz = Math.max(l.lo, Math.min(l.hi, z)); return {s: sz, d: Math.hypot(x - l.p, z - sz), x: l.p, z: sz}; }
+    if(l.axis === 'ew'){ var sx = Math.max(l.lo, Math.min(l.hi, x)); return {s: sx, d: Math.hypot(z - l.p, x - sx), x: sx, z: l.p}; }
+    var best = {s: 0, d: 1e9, x: 0, z: 0}, P = l.pts;
+    for(var k = 0; k < P.length - 1; k++){
+      var ax = P[k][0], az = P[k][1], bx = P[k + 1][0], bz = P[k + 1][1];
+      if(Math.abs(x - ax) > best.d + 8 && Math.abs(x - bx) > best.d + 8) continue;
+      if(Math.abs(z - az) > best.d + 8 && Math.abs(z - bz) > best.d + 8) continue;
+      var dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz;
+      var t = L2 > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / L2)) : 0;
+      var qx = ax + dx * t, qz = az + dz * t, d = Math.hypot(x - qx, z - qz);
+      if(d < best.d) best = {s: l.cum[k] + Math.sqrt(L2) * t, d: d, x: qx, z: qz};
+    }
+    return best;
+  };
+  function lineDist(l, x, z){ return l.axis === 'ns' ? Math.abs(x - l.p) : l.axis === 'ew' ? Math.abs(z - l.p) : M.lineNear(l, x, z).d; }
   var NSL = lines.filter(function(l){ return l.axis === 'ns'; }).sort(function(a, b){ return a.p - b.p; });
   var EWL = lines.filter(function(l){ return l.axis === 'ew'; }).sort(function(a, b){ return a.p - b.p; });
   M.lineName = function(l, along){
@@ -111,7 +192,7 @@ function build(G, seed){
   var walls = [];      // {x0,z0,x1,z1,h}
   var signs = [];      // store signs {x,z,face,label,w}
   var canals = G.canals.map(function(c){ return {name: c.name, pts: c.pts}; });
-  var ponds = [];      // {x,z,rx,rz}
+  var ponds = (G.ponds || []).map(function(p){ return {x: p.x, z: p.z, rx: p.rx, rz: p.rz}; });      // {x,z,rx,rz}
   var fields = [];     // {x0,z0,x1,z1,k}
   var lights = [];     // traffic signal positions (visual)
   M.boxes = boxes; M.circles = circles; M.props = props; M.houses = houses; M.cells = cells;
@@ -152,7 +233,9 @@ function build(G, seed){
 
   /* ---------------- cells ---------------- */
   var ci = 0;
-  for(var i = 0; i < NSL.length; i++){
+  // a free town says where its districts are: flat pads beside the roads
+  if(FREE) (G.pockets || []).forEach(function(pk){ cells.push({id: ci++, x0: pk.x0, x1: pk.x1, z0: pk.z0, z1: pk.z1, W: null, E: null, N: null, S: null, type: pk.type, name: pk.name, pk: pk}); });
+  for(var i = 0; i < (FREE ? 0 : NSL.length); i++){
     var L = NSL[i], Rn = NSL[i + 1];
     var cx0 = L.p + L.w / 2 + 3, cx1 = Rn ? Rn.p - Rn.w / 2 - 3 : X1 - 2;
     for(var j = -1; j < EWL.length; j++){
@@ -170,7 +253,7 @@ function build(G, seed){
     return null;
   }
   M.cellAt = cellAt;
-  var mainLine = EWL.filter(function(l){ return /Main/.test(l.names[0].name); })[0];
+  var mainLine = (FREE ? lines : EWL).filter(function(l){ return /Main/.test(l.names[0].name); })[0];
   var gilbertLine = NSL.filter(function(l){ return /Gilbert/.test(l.names[0].name); })[0];
   var elliotLine = EWL.filter(function(l){ return /Elliot/.test(l.names[0].name); })[0];
   M.mainLine = mainLine; M.gilbertLine = gilbertLine;
@@ -184,6 +267,7 @@ function build(G, seed){
   cells.forEach(function(c){
     var w = c.x1 - c.x0, h = c.z1 - c.z0;
     var cxm = (c.x0 + c.x1) / 2, czm = (c.z0 + c.z1) / 2;
+    if(FREE) return;
     if(G.zones){
       // a made-up town: districts by rectangle
       var zn = null;
@@ -261,9 +345,11 @@ function build(G, seed){
   /* house numbering: Mesa counts 800 to the mile from Center Street and
      Main Street; Gilbert from Gilbert Road. (Grandpa's 122 E Palo Verde
      comes out right with this.) */
-  var mileGame = (G.ns[1].x - G.ns[0].x);
-  var centerX = (G.ns[2].x + G.ns[3].x) / 2;
+  var mileGame = FREE ? 1 : (G.ns[1].x - G.ns[0].x);
+  var centerX = FREE ? 0 : (G.ns[2].x + G.ns[3].x) / 2;
   function houseNum(x, z, ew){
+    if(FREE){ var o = G.origin || [X1 / 2, Z1 / 2], al = ew ? x - o[0] : z - o[1];
+      return {n: Math.max(10, Math.round(Math.abs(al) / 2) * 2), dir: ew ? (al >= 0 ? 'E' : 'W') : (al >= 0 ? 'S' : 'N')}; }
     var gilbert = z > G.ew[4].z - 5 && x > G.ns[4].x;
     var base = ew ? (gilbert ? gilbertLine.p : centerX) : mainLine.p;
     var along = ew ? x - base : z - base;
@@ -300,6 +386,39 @@ function build(G, seed){
     });
   }
 
+  /* from a loop's side straight out to the first road, within 110 m */
+  function rayHit(x, z, dx, dz, maxD){
+    var best = null;
+    lines.forEach(function(l){
+      if(l.kind === 'fwy') return;
+      var P = l.pts;
+      for(var k = 0; k < P.length - 1; k++){
+        var ax = P[k][0], az = P[k][1], bx = P[k + 1][0], bz = P[k + 1][1];
+        var ex = bx - ax, ez = bz - az, den = dx * ez - dz * ex;
+        if(Math.abs(den) < 1e-9) continue;
+        var t = ((ax - x) * ez - (az - z) * ex) / den, u = ((ax - x) * dz - (az - z) * dx) / den;
+        if(t > 0 && t < maxD && u >= 0 && u <= 1 && (!best || t < best.t)) best = {t: t, x: x + dx * t, z: z + dz * t, line: l};
+      }
+    });
+    return best;
+  }
+  function freeEntrySides(c, lx0, lz0, lx1, lz1){
+    var out = [];
+    ['n', 's', 'w', 'e'].forEach(function(sd){
+      var horiz = sd === 'n' || sd === 's';
+      for(var tries = 0; tries < 5; tries++){
+        var f = 0.5 + (tries ? (R() - 0.5) * 0.7 : (R() - 0.5) * 0.3);
+        var at = Math.round(horiz ? lx0 + (lx1 - lx0) * f : lz0 + (lz1 - lz0) * f);
+        var lx = horiz ? at : (sd === 'w' ? lx0 : lx1), lz = horiz ? (sd === 'n' ? lz0 : lz1) : at;
+        var dx = sd === 'w' ? -1 : sd === 'e' ? 1 : 0, dz = sd === 'n' ? -1 : sd === 's' ? 1 : 0;
+        var hit = rayHit(lx, lz, dx, dz, 110);
+        if(hit){ out.push({side: sd, at: at, lx: lx, lz: lz, gx: hit.x, gz: hit.z, line: hit.line, s: M.lineNear(hit.line, hit.x, hit.z).s, d: hit.t}); break; }
+      }
+    });
+    out.sort(function(a, b){ return a.d - b.d; });
+    return out.slice(0, 2);
+  }
+
   function homesCell(c, named){
     var w = c.x1 - c.x0, h = c.z1 - c.z0;
     var ins = Math.max(31, Math.min(40, Math.min(w, h) * 0.27));
@@ -315,7 +434,18 @@ function build(G, seed){
     if(!cand.length) cand = ['n', 's', 'w', 'e'].filter(function(sd){ var l = sideLine(c, sd); return l && l.kind === 'art'; }).slice(0, 1);
     if(!cand.length) cand = ['n', 's', 'w', 'e'].filter(function(sd){ var l = sideLine(c, sd); return l && l.kind !== 'fwy'; }).slice(0, 1);
     if(cand.length > 2) cand = cand.slice(0, 2);
+    if(FREE) cand = freeEntrySides(c, lx0, lz0, lx1, lz1);
     cand.forEach(function(sd){
+      if(FREE){
+        var e0 = sd; sd = e0.side;
+        var hz = sd === 'n' || sd === 's';
+        var e1 = {side: sd, at: e0.at, lx: e0.lx, lz: e0.lz, gx: e0.gx, gz: e0.gz, line: e0.line, s: e0.s};
+        loop.entries.push(e1); gaps.push({side: sd, at: e0.at});
+        if(hz) resRoads.push({x0: e0.at - W_RES / 2, x1: e0.at + W_RES / 2, z0: Math.min(e1.lz, e1.gz), z1: Math.max(e1.lz, e1.gz), name: name});
+        else resRoads.push({z0: e0.at - W_RES / 2, z1: e0.at + W_RES / 2, x0: Math.min(e1.lx, e1.gx), x1: Math.max(e1.lx, e1.gx), name: name});
+        entriesWanted.push({loop: loop, e: e1});
+        return;
+      }
       var l = sideLine(c, sd);
       var horiz = sd === 'n' || sd === 's';
       var at = horiz ? (lx0 + lx1) / 2 + (R() - 0.5) * (lx1 - lx0) * 0.4 : (lz0 + lz1) / 2 + (R() - 0.5) * (lz1 - lz0) * 0.4;
@@ -513,7 +643,8 @@ function build(G, seed){
     }
     fields.push({x0: L.x - 40, z0: bz1 + 28, x1: L.x + 40, z1: Math.min(c.z1 - 4, bz1 + 70), k: 'roses'});
     // the load zone: drive through the lot
-    M.shops.push({key: 'watsons', name: "Watson's Flowers", x: L.x, z: front + 8, r: 11, line: mainLine, lx: L.x, lz: mainLine.p});
+    var mn = FREE ? M.lineNear(mainLine, L.x, front) : null;
+    M.shops.push({key: 'watsons', name: "Watson's Flowers", x: L.x, z: front + 8, r: 11, line: mainLine, lx: FREE ? mn.x : L.x, lz: FREE ? mn.z : mainLine.p, s: FREE ? mn.s : null});
     // the rest: desert, a few palms
     for(var x = c.x0 + 6; x < L.x - 44; x += 16) for(var z = c.z0 + 6; z < c.z1 - 6; z += 16) if(R() < 0.3) addTree(x, z, R() < 0.5 ? 'palm' : 'saguaro');
     for(var x2 = L.x + 44; x2 < c.x1 - 6; x2 += 16) for(var z2 = c.z0 + 6; z2 < c.z1 - 6; z2 += 16) if(R() < 0.3) addTree(x2, z2, 'pv');
@@ -533,7 +664,7 @@ function build(G, seed){
     if(!best) return;
     best.grandpa = true; best.num = 122; best.dir = 'E';
     M.grandpaHouse = best.id;
-    M.shops.push({key: 'grandpa', name: G.zones ? "Grandpa's" : "Grandpa's (Gilbert)", x: best.front.x, z: best.front.z, r: 11, house: best.id});
+    M.shops.push({key: 'grandpa', name: (FREE || G.zones) ? "Grandpa's" : "Grandpa's (Gilbert)", x: best.front.x, z: best.front.z, r: 11, house: best.id});
   }
 
   function templeCell(c){
@@ -846,7 +977,7 @@ function build(G, seed){
 
   // freeway sound walls between crossings, and the map's edge
   lines.forEach(function(l){
-    if(l.kind !== 'fwy') return;
+    if(l.kind !== 'fwy' || FREE) return;
     var cross = (l.axis === 'ns' ? EWL : NSL).map(function(o){ return o.p; }).sort(function(a, b){ return a - b; });
     var off = l.w / 2 + 1;
     var pts = [l.lo].concat(cross).concat([l.hi]);
@@ -873,14 +1004,14 @@ function build(G, seed){
         var nx = -(bz - az) / segL, nz = (bx - ax) / segL;
         var side = R() < 0.5 ? -1 : 1;
         var kx = ax + (bx - ax) * t + nx * side * (CANAL_W / 2 + BANK_W / 2), kz = az + (bz - az) * t + nz * side * (CANAL_W / 2 + BANK_W / 2);
-        var nearRoad = lines.some(function(l){ return Math.abs((l.axis === 'ns' ? kx : kz) - l.p) < l.w / 2 + 30; });
+        var nearRoad = lines.some(function(l){ return lineDist(l, kx, kz) < l.w / 2 + 30; });
         if(!nearRoad) pickups.push({k: 'keg', x: kx, z: kz});
       }
     }
   });
   // where a grid road crosses a canal: a dirt ramp on each shoulder, both ways
   lines.forEach(function(l){
-    if(l.kind === 'fwy') return;
+    if(l.kind === 'fwy' || FREE) return;
     canals.forEach(function(cn){
       var p = cn.pts;
       for(var k = 0; k < p.length - 1; k++){
@@ -919,7 +1050,7 @@ function build(G, seed){
         for(var t = 0; t <= 1; t += 0.05){
           var x = p[k][0] + (p[k + 1][0] - p[k][0]) * t, z = p[k][1] + (p[k + 1][1] - p[k][1]) * t;
           var d = Math.hypot(x - g.x, z - g.z);
-          var nearRoad = lines.some(function(l){ return Math.abs((l.axis === 'ns' ? x : z) - l.p) < l.w / 2 + 20; });
+          var nearRoad = lines.some(function(l){ return lineDist(l, x, z) < l.w / 2 + 20; });
           if(d < bd && !nearRoad){
             bd = d;
             var segL = Math.hypot(p[k + 1][0] - p[k][0], p[k + 1][1] - p[k][1]);
@@ -972,25 +1103,37 @@ function build(G, seed){
   canals.forEach(function(cn){ fillBuffer(cn.pts, CANAL_W / 2, SURF.WATER); });
   ponds.forEach(function(p){ if(!p.shallow) fillEllipse(p.x, p.z, p.rx, p.rz, SURF.WATER); });
   // roads and sidewalks last: a road over a canal is a bridge
-  lines.forEach(function(l){
+  if(FREE) lines.forEach(function(l){ if(l.kind !== 'fwy') fillBuffer(l.pts, l.w / 2 + 3, SURF.CONCRETE); });
+  if(FREE) lines.forEach(function(l){ fillBuffer(l.pts, l.w / 2, SURF.ROAD); });
+  if(!FREE) lines.forEach(function(l){
     var hw = l.w / 2;
     if(l.kind !== 'fwy'){
       if(l.axis === 'ns') fillRect(l.p - hw - 3, l.lo, l.p + hw + 3, l.hi, SURF.CONCRETE);
       else fillRect(l.lo, l.p - hw - 3, l.hi, l.p + hw + 3, SURF.CONCRETE);
     }
   });
-  lines.forEach(function(l){
+  if(!FREE) lines.forEach(function(l){
     var hw = l.w / 2;
     if(l.axis === 'ns') fillRect(l.p - hw, l.lo, l.p + hw, l.hi, SURF.ROAD);
     else fillRect(l.lo, l.p - hw, l.hi, l.p + hw, SURF.ROAD);
   });
   resRoads.forEach(function(r){ fillRect(r.x0, r.z0, r.x1, r.z1, SURF.ROAD); });
-
   M.surf = function(x, z){
     var i = Math.floor(x / RES), j = Math.floor(z / RES);
     if(i < 0 || j < 0 || i >= GW || j >= GH) return SURF.DIRT;
     return surf[j * GW + i];
   };
+  // a free town's open ground: saguaros, palo verdes and brush, clear of the roads
+  if(FREE && G.scatter){
+    var openAt = function(x, z){ for(var a = 0; a < 5; a++){ var ox = a === 1 ? 8 : a === 2 ? -8 : 0, oz = a === 3 ? 8 : a === 4 ? -8 : 0; if(M.surf(x + ox, z + oz) !== SURF.DIRT) return false; } return true; };
+    for(var sc = 0; sc < G.scatter; sc++){
+      var tx = 20 + R() * (X1 - 40), tz = 20 + R() * (Z1 - 40), rr = R();
+      if(!openAt(tx, tz) || cells.some(function(c){ return inRect({x: tx, z: tz}, c, 6); })) continue;
+      if(rr < 0.3) addTree(tx, tz, 'saguaro'); else if(rr < 0.5) addTree(tx, tz, 'pv'); else addProp(tx, tz, 'bush');
+    }
+  }
+
+
 
   /* the ground's height: flat (this is Mesa) but for the canals, the
      retention basins and the ramps */
@@ -1003,17 +1146,105 @@ function build(G, seed){
   }
   ramps.forEach(function(rp){ hgPut(rp.x0, rp.z0, rp.x1, rp.z1, rp); });
   decks.forEach(function(di){ var b = boxes[di]; hgPut(b.x0, b.z0, b.x1, b.z1, b); });
+  /* a free town has hills: the ground from G.terrain, with every road
+     graded along its length (smoothed, pinned where roads meet, crests
+     added where the town asks for them) and cut into the hillside, and
+     every district a flat pad. On a 4 m grid. */
+  var HR = 4, HW4 = Math.ceil(X1 / HR) + 2, HH4 = Math.ceil(Z1 / HR) + 2, Hg = null;
+  if(FREE) (function(){
+    var T = G.terrain, N = HW4 * HH4;
+    Hg = new Float32Array(N);
+    for(var j = 0; j < HH4; j++) for(var i = 0; i < HW4; i++) Hg[j * HW4 + i] = T(i * HR, j * HR);
+    // districts: flat pads, blended into the hills round them
+    cells.forEach(function(c){
+      var ph = c.pk && c.pk.h != null ? c.pk.h : T((c.x0 + c.x1) / 2, (c.z0 + c.z1) / 2), B = 34;
+      c.gy = ph;
+      for(var j = Math.max(0, Math.floor((c.z0 - B) / HR)); j <= Math.min(HH4 - 1, Math.ceil((c.z1 + B) / HR)); j++)
+        for(var i = Math.max(0, Math.floor((c.x0 - B) / HR)); i <= Math.min(HW4 - 1, Math.ceil((c.x1 + B) / HR)); i++){
+          var x = i * HR, z = j * HR;
+          var dx = Math.max(c.x0 - x, 0, x - c.x1), dz = Math.max(c.z0 - z, 0, z - c.z1), d = Math.hypot(dx, dz);
+          var t = d >= B ? 0 : 1 - smooth(d / B);
+          Hg[j * HW4 + i] += (ph - Hg[j * HW4 + i]) * t;
+        }
+    });
+    function base(x, z){ var i = Math.max(0, Math.min(HW4 - 2, x / HR)), j = Math.max(0, Math.min(HH4 - 2, z / HR)), i0 = Math.floor(i), j0 = Math.floor(j), fi = i - i0, fj = j - j0;
+      return (Hg[j0 * HW4 + i0] * (1 - fi) + Hg[j0 * HW4 + i0 + 1] * fi) * (1 - fj) + (Hg[(j0 + 1) * HW4 + i0] * (1 - fi) + Hg[(j0 + 1) * HW4 + i0 + 1] * fi) * fj; }
+    // where roads meet: one height for all of them
+    var jh = {};
+    Object.keys(G.junctions).forEach(function(k){ var p = G.junctions[k]; jh[k] = base(p[0], p[1]); });
+    lines.forEach(function(l){
+      var P = l.pts, n = P.length, raw = P.map(function(p){ return base(p[0], p[1]); }), prof = new Float32Array(n);
+      for(var k = 0; k < n; k++){ var a = 0, m = 0; for(var q = Math.max(0, k - 7); q <= Math.min(n - 1, k + 7); q++){ a += raw[q]; m++; } prof[k] = a / m; }
+      // pinned at the junctions, the difference spread along between them
+      var pins = l.junc.map(function(j){ var k = l.axis ? Math.round((j.at - l.lo) / ((l.hi - l.lo) / (n - 1))) : j.idx; return {k: k, d: jh[j.j] - prof[k]}; }).sort(function(a, b){ return a.k - b.k; });
+      if(pins.length){
+        for(var k2 = 0; k2 < n; k2++){
+          var d;
+          if(k2 <= pins[0].k) d = pins[0].d;
+          else if(k2 >= pins[pins.length - 1].k) d = pins[pins.length - 1].d;
+          else for(var q2 = 0; q2 < pins.length - 1; q2++) if(k2 >= pins[q2].k && k2 <= pins[q2 + 1].k){ var f = (k2 - pins[q2].k) / Math.max(1, pins[q2 + 1].k - pins[q2].k); d = pins[q2].d + (pins[q2 + 1].d - pins[q2].d) * f; break; }
+          prof[k2] += d;
+        }
+      }
+      // no steeper than 12%: graded both ways, the junctions held where they are
+      var pinned = {}; pins.forEach(function(p){ pinned[p.k] = true; });
+      for(var pass = 0; pass < 2; pass++){
+        for(var k4 = 1; k4 < n; k4++) if(!pinned[k4]){ var g1 = 0.12 * (l.cum[k4] - l.cum[k4 - 1]); prof[k4] = Math.max(prof[k4 - 1] - g1, Math.min(prof[k4 - 1] + g1, prof[k4])); }
+        for(var k5 = n - 2; k5 >= 0; k5--) if(!pinned[k5]){ var g2 = 0.12 * (l.cum[k5 + 1] - l.cum[k5]); prof[k5] = Math.max(prof[k5 + 1] - g2, Math.min(prof[k5 + 1] + g2, prof[k5])); }
+      }
+      // crests to fly off
+      l.crests.forEach(function(cr){ var at = cr.at * l.len; for(var k3 = 0; k3 < n; k3++){ var u = (l.cum[k3] - at) / cr.w; if(Math.abs(u) < 3) prof[k3] += cr.h * Math.exp(-u * u); } });
+      l.prof = prof;
+    });
+    // cut the roads into the ground: flat across, a shoulder, then a blend
+    var dBest = new Float32Array(N).fill(1e9), hRoad = new Float32Array(N), wRoad = new Float32Array(N);
+    lines.forEach(function(l){
+      var P = l.pts, hw = l.w / 2, reach = hw + 8 + 30;
+      for(var k = 0; k < P.length - 1; k++){
+        var ax = P[k][0], az = P[k][1], bx = P[k + 1][0], bz = P[k + 1][1], ex = bx - ax, ez = bz - az, L2 = ex * ex + ez * ez;
+        var i0 = Math.max(0, Math.floor((Math.min(ax, bx) - reach) / HR)), i1 = Math.min(HW4 - 1, Math.ceil((Math.max(ax, bx) + reach) / HR));
+        var j0 = Math.max(0, Math.floor((Math.min(az, bz) - reach) / HR)), j1 = Math.min(HH4 - 1, Math.ceil((Math.max(az, bz) + reach) / HR));
+        for(var j = j0; j <= j1; j++) for(var i = i0; i <= i1; i++){
+          var x = i * HR, z = j * HR, t = L2 > 0 ? Math.max(0, Math.min(1, ((x - ax) * ex + (z - az) * ez) / L2)) : 0;
+          var d = Math.hypot(x - ax - ex * t, z - az - ez * t) - hw;
+          var c = j * HW4 + i;
+          if(d < dBest[c]){ dBest[c] = d; hRoad[c] = l.prof[k] + (l.prof[k + 1] - l.prof[k]) * t; }
+        }
+      }
+    });
+    for(var c = 0; c < N; c++){
+      var d = dBest[c];
+      if(d <= 8) Hg[c] = hRoad[c];
+      else if(d < 38){ var t = smooth((d - 8) / 30); Hg[c] = hRoad[c] + (Hg[c] - hRoad[c]) * t; }
+    }
+  })();
+  function smooth(t){ t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); }
+  /* the bare ground (no jumps, roofs or basins) */
+  M.ground = function(x, z){
+    if(!Hg) return 0;
+    var i = x / HR, j = z / HR;
+    if(i < 0) i = 0; else if(i > HW4 - 2) i = HW4 - 2;
+    if(j < 0) j = 0; else if(j > HH4 - 2) j = HH4 - 2;
+    var i0 = Math.floor(i), j0 = Math.floor(j), fi = i - i0, fj = j - j0, a = j0 * HW4 + i0;
+    return (Hg[a] * (1 - fi) + Hg[a + 1] * fi) * (1 - fj) + (Hg[a + HW4] * (1 - fi) + Hg[a + HW4 + 1] * fi) * fj;
+  };
+  // everything that stands on the ground stands where the ground is
+  boxes.forEach(function(b){ b.gy = M.ground((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2); });
+  buildings.forEach(function(b){ b.gy = M.ground((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2); });
+  ramps.forEach(function(r){ r.gy = M.ground((r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2); });
+
   M.height = function(x, z){
     var s = M.surf(x, z);
-    if(s === SURF.WATER) return -2.8;
-    var h = 0;
+    var h = M.ground(x, z);
+    if(s === SURF.WATER) return h - 2.8;
+    var h0 = h;
     var cell = hashR[Math.floor(z / HG) * HGW + Math.floor(x / HG)];
     if(x >= 0 && z >= 0 && x < X1 && z < Z1 && cell){
       for(var q = 0; q < cell.length; q++){
         var it = cell[q];
         if(x < it.x0 || x > it.x1 || z < it.z0 || z > it.z1) continue;
-        if(it.len){ var al = it.dx ? (x - it.s0) * it.dx : (z - it.s0) * it.dz; if(al >= 0 && al <= it.len) h = Math.max(h, it.h * al / it.len); }
-        else if(it.h > h) h = it.h;
+        if(it.len){ var al = it.dx ? (x - it.s0) * it.dx : (z - it.s0) * it.dz; if(al >= 0 && al <= it.len) h = Math.max(h, h0 + it.h * al / it.len); }
+        else if((it.gy || 0) + it.h > h) h = (it.gy || 0) + it.h;
       }
     }
     for(var k = 0; k < basins.length; k++){
@@ -1067,19 +1298,34 @@ function build(G, seed){
     nodes[a].adj.push({n: b, d: cost, len: d, name: name, kind: kind});
     nodes[b].adj.push({n: a, d: cost, len: d, name: name, kind: kind});
   }
-  // crossings
-  NSL.forEach(function(a){ EWL.forEach(function(b){
-    var n = node(a.p, b.p);
-    a.nodes.push({at: b.p, n: n}); b.nodes.push({at: a.p, n: n});
-    if(a.kind !== 'fwy' || b.kind !== 'fwy') lights.push({x: a.p, z: b.p, wa: a.w, wb: b.w, a: a.id, b: b.id, sig: a.kind !== 'fwy' && b.kind !== 'fwy' && !(a.kind === 'col' && b.kind === 'col')});
+  // crossings (and their lights: phase a for line a, phase b for line b)
+  function mkLight(x, z, a, b){
+    if(a.kind === 'fwy' && b.kind === 'fwy') return null;
+    var L = {x: x, z: z, wa: a.w, wb: b.w, a: a.id, b: b.id, sig: a.kind !== 'fwy' && b.kind !== 'fwy' && !(a.kind === 'col' && b.kind === 'col')};
+    lights.push(L);
+    return L;
+  }
+  if(!FREE) NSL.forEach(function(a){ EWL.forEach(function(b){
+    var n = node(a.p, b.p), L = mkLight(a.p, b.p, a, b);
+    a.nodes.push({at: b.p, n: n, L: L}); b.nodes.push({at: a.p, n: n, L: L});
   }); });
+  if(FREE){
+    // junctions: one node each, on every line that goes through it
+    var jnode = {}, jlines = {};
+    lines.forEach(function(l){ l.junc.forEach(function(j){ (jlines[j.j] || (jlines[j.j] = [])).push({l: l, at: j.at}); }); });
+    Object.keys(jlines).forEach(function(k){
+      var p = G.junctions[k], n = node(p[0], p[1]), ls = jlines[k], L = null;
+      if(ls.length > 1) L = mkLight(p[0], p[1], ls[0].l, ls[1].l);
+      ls.forEach(function(q){ q.l.nodes.push({at: q.at, n: n, L: L}); });
+    });
+  }
   // the ends of every line, so a dead end is still drivable for the computer
   lines.forEach(function(l){
-    var lo = l.axis === 'ns' ? l.lo + 8 : Math.max(l.lo, X0 + 8), hi = l.hi - 8;
-    var first = Math.min.apply(null, l.nodes.map(function(q){ return q.at; }));
-    var last = Math.max.apply(null, l.nodes.map(function(q){ return q.at; }));
-    if(first - lo > 20){ var n0 = l.axis === 'ns' ? node(l.p, lo) : node(lo, l.p); l.nodes.push({at: lo, n: n0}); }
-    if(hi - last > 20){ var n1 = l.axis === 'ns' ? node(l.p, hi) : node(hi, l.p); l.nodes.push({at: hi, n: n1}); }
+    var lo = FREE ? l.lo + 4 : l.axis === 'ns' ? l.lo + 8 : Math.max(l.lo, X0 + 8), hi = l.hi - (FREE ? 4 : 8);
+    var first = l.nodes.length ? Math.min.apply(null, l.nodes.map(function(q){ return q.at; })) : 1e9;
+    var last = l.nodes.length ? Math.max.apply(null, l.nodes.map(function(q){ return q.at; })) : -1e9;
+    if(first - lo > 20){ var p0 = M.linePoint(l, lo), n0 = node(p0.x, p0.z); l.nodes.push({at: lo, n: n0}); }
+    if(hi - last > 20){ var p1 = M.linePoint(l, hi), n1 = node(p1.x, p1.z); l.nodes.push({at: hi, n: n1}); }
   });
   // the loops
   loops.forEach(function(lp){
@@ -1088,10 +1334,10 @@ function build(G, seed){
     var sides = {n: [c0, c1], e: [c1, c2], s: [c3, c2], w: [c0, c3]};
     var onSide = {n: [], e: [], s: [], w: []};
     lp.entries.forEach(function(e){
-      var ln = node(e.lx, e.lz), gn = (e.line.axis === 'ns') ? node(e.line.p, e.gz) : node(e.gx, e.line.p);
+      var ln = node(e.lx, e.lz), gn = e.s != null ? node(e.gx, e.gz) : (e.line.axis === 'ns') ? node(e.line.p, e.gz) : node(e.gx, e.line.p);
       e.ln = ln; e.gn = gn;
       onSide[e.side].push(ln);
-      e.line.nodes.push({at: e.line.axis === 'ns' ? e.gz : e.gx, n: gn});
+      e.line.nodes.push({at: e.s != null ? e.s : e.line.axis === 'ns' ? e.gz : e.gx, n: gn});
       link(ln, gn, lp.name, 'res');
     });
     ['n', 'e', 's', 'w'].forEach(function(sd){
@@ -1104,7 +1350,7 @@ function build(G, seed){
   });
   // Watson's: a node on Main in front of the lot
   M.shops.forEach(function(sh){
-    if(sh.line){ var n = node(sh.lx, sh.lz); sh.line.nodes.push({at: sh.lx, n: n}); sh.node = n; }
+    if(sh.line){ var n = node(sh.lx, sh.lz); sh.line.nodes.push({at: sh.s != null ? sh.s : sh.lx, n: n}); sh.node = n; }
   });
   // join each line's nodes in order
   lines.forEach(function(l){
@@ -1115,6 +1361,12 @@ function build(G, seed){
         // the same spot: merge by a zero-length link
         nodes[a.n].adj.push({n: b.n, d: 0.01, len: 0, name: M.lineName(l, a.at), kind: l.kind});
         nodes[b.n].adj.push({n: a.n, d: 0.01, len: 0, name: M.lineName(l, a.at), kind: l.kind});
+        continue;
+      }
+      if(!l.axis && b.at - a.at > 30){
+        var steps = Math.ceil((b.at - a.at) / 22), prev = a.n;
+        for(var q = 1; q < steps; q++){ var pp = M.linePoint(l, a.at + (b.at - a.at) * q / steps), sn = node(pp.x, pp.z); link(prev, sn, M.lineName(l, a.at), l.kind); prev = sn; }
+        link(prev, b.n, M.lineName(l, a.at), l.kind);
         continue;
       }
       link(a.n, b.n, M.lineName(l, (a.at + b.at) / 2), l.kind);
@@ -1263,7 +1515,7 @@ function build(G, seed){
 /* the towns to pick from in the lobby; built once each, on first use */
 var TOWNS = [
   {k: 'mesa', name: 'Mesa & Gilbert', blurb: 'The real streets where the shop was: Main Street, Gilbert Road, the canals.', geo: 'WGEO'},
-  {k: 'flats', name: 'Rattlesnake Flats', blurb: 'Made for driving: downtown alleys, an airfield, a speedway, a rail yard and a quarry.', geo: 'WGEO_FLATS'}
+  {k: 'ridge', name: 'Rattlesnake Ridge', blurb: 'Made for driving: curving roads over the hills, a mountain pass, an airfield on the mesa, crests to fly off.', geo: 'WGEO_RIDGE'}
 ];
 var built = {};
 function town(key){

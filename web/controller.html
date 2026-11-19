@@ -236,7 +236,7 @@
 </div>
 
 <script src="geo.js"></script>
-<script src="flats.js"></script>
+<script src="ridge.js"></script>
 <script src="map.js"></script>
 <script src="sim.js"></script>
 <script src="net.js"></script>
@@ -1082,9 +1082,9 @@ function drawDispatch(){
   const X = x => ox + x * sc, Z = z => oy + z * sc;
   g.fillStyle = '#86a35c'; MAP.cells.forEach(cl => { if(cl.type === 'homes' || cl.type === 'grandpa') g.fillRect(X(cl.x0), Z(cl.z0), (cl.x1 - cl.x0) * sc, (cl.z1 - cl.z0) * sc); });
   g.strokeStyle = '#3d8f8a'; g.lineWidth = 2; MAP.canals.forEach(cn => { g.beginPath(); cn.pts.forEach((p, i) => i ? g.lineTo(X(p[0]), Z(p[1])) : g.moveTo(X(p[0]), Z(p[1]))); g.stroke(); });
-  MAP.lines.forEach(l => { g.strokeStyle = l.kind === 'fwy' ? '#f2c531' : '#333'; g.lineWidth = l.kind === 'art' ? 2.5 : l.kind === 'fwy' ? 3.5 : 1; g.beginPath(); if(l.axis === 'ns'){ g.moveTo(X(l.p), Z(l.lo)); g.lineTo(X(l.p), Z(l.hi)); } else { g.moveTo(X(l.lo), Z(l.p)); g.lineTo(X(l.hi), Z(l.p)); } g.stroke(); });
+  MAP.lines.forEach(l => { g.strokeStyle = l.kind === 'fwy' ? '#f2c531' : '#333'; g.lineWidth = l.kind === 'art' ? 2.5 : l.kind === 'fwy' ? 3.5 : 1; g.beginPath(); if(MAP.free){ l.pts.forEach((p, i) => i ? g.lineTo(X(p[0]), Z(p[1])) : g.moveTo(X(p[0]), Z(p[1]))); } else if(l.axis === 'ns'){ g.moveTo(X(l.p), Z(l.lo)); g.lineTo(X(l.p), Z(l.hi)); } else { g.moveTo(X(l.lo), Z(l.p)); g.lineTo(X(l.hi), Z(l.p)); } g.stroke(); });
   g.font = 'bold 10px system-ui'; g.fillStyle = 'rgba(0,0,0,0.6)';
-  MAP.lines.filter(l => l.kind === 'art').forEach(l => { const n = MAP.lineName(l, l.axis === 'ns' ? 600 : 0); if(l.axis === 'ns'){ g.save(); g.translate(X(l.p) + 3, Z(MAP.bounds.z0) + 4); g.rotate(Math.PI / 2); g.fillText(n, 0, 0); g.restore(); } else g.fillText(n, X(MAP.bounds.x0) + 18, Z(l.p) - 3); });
+  MAP.lines.filter(l => l.kind === 'art').forEach(l => { const n = MAP.lineName(l, l.axis === 'ns' ? 600 : 0); if(MAP.free){ const p = MAP.linePoint(l, l.lo + (l.hi - l.lo) * 0.3); g.fillText(n, X(p.x) + 4, Z(p.z) - 4); } else if(l.axis === 'ns'){ g.save(); g.translate(X(l.p) + 3, Z(MAP.bounds.z0) + 4); g.rotate(Math.PI / 2); g.fillText(n, 0, 0); g.restore(); } else g.fillText(n, X(MAP.bounds.x0) + 18, Z(l.p) - 3); });
   MAP.shops.forEach(sh => { g.fillStyle = '#f2a7b4'; g.beginPath(); g.arc(X(sh.x), Z(sh.z), 8, 0, Math.PI * 2); g.fill(); g.strokeStyle = '#fff'; g.lineWidth = 2; g.stroke(); });
   // orders: grey waiting, pink ready, white in a van; a star for priority
   s.ord.forEach(o => {

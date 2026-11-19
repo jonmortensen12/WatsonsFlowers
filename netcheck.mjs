@@ -221,16 +221,16 @@ ok(await dad.evaluate(() => document.getElementById('jobs').classList.contains('
 
 // the other town: picked on one phone, followed by the TV and every phone
 await uncle.locator('#towns button', {hasText: 'Rattlesnake'}).click();
-await tv.waitForFunction(() => WTV.M.key === 'flats', null, {polling: 250, timeout: 30000});
+await tv.waitForFunction(() => WTV.M.key === 'ridge', null, {polling: 250, timeout: 30000});
 await sleep(1500);
 const towns = await Promise.all([dad, kid, aunt, grandma, uncle, tiny].map(p => p.evaluate(() => TOWN)));
-ok(towns.every(t => t === 'flats'), 'Rattlesnake Flats picked on a phone: the TV and every phone follow (' + towns.join(' ') + ')');
+ok(towns.every(t => t === 'ridge'), 'Rattlesnake Ridge picked on a phone: the TV and every phone follow (' + towns.join(' ') + ')');
 await tiny.click('#startBtn');
 await tv.waitForFunction(() => WTV.G.phase === 'count' || WTV.G.phase === 'day', null, {polling: 250, timeout: 10000});
 await dad.waitForFunction(() => cur === 'drive' && DRV && DRV.van, null, {polling: 300, timeout: 60000});
-const atShop = await dad.evaluate(() => { const sh = WMap.town('flats').shops[0], v = DRV.van; return Math.round(Math.hypot(v.x - sh.x, v.z - sh.z)); });
-ok(atShop < 60, "the driver's phone starts the day at Watson's in the Flats (" + atShop + ' m away)');
-ok(await tv.evaluate(() => WTV.G.S.M.key === 'flats' && WTV.G.S.M.houses.length > 400), 'the day runs in the Flats');
+const atShop = await dad.evaluate(() => { const sh = WMap.town('ridge').shops[0], v = DRV.van; return Math.round(Math.hypot(v.x - sh.x, v.z - sh.z)); });
+ok(atShop < 60, "the driver's phone starts the day at Watson's in the Ridge (" + atShop + ' m away)');
+ok(await tv.evaluate(() => WTV.G.S.M.key === 'ridge' && WTV.G.S.M.houses.length > 400), 'the day runs in Rattlesnake Ridge');
 await sleep(3000);
 
 // a driver drops out: the computer takes the wheel
