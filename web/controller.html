@@ -132,9 +132,11 @@
   <div><h1>Watson's</h1><br><div class="flowers">FLOWERS</div></div>
   <div class="small">The Best Since 1927 &middot; Mesa &amp; Gilbert</div>
   <input id="nameIn" maxlength="14" placeholder="Your name" autocomplete="off">
-  <input id="codeIn" maxlength="4" placeholder="Code on the TV" autocomplete="off" style="text-transform:uppercase">
+  <input id="codeIn" maxlength="4" placeholder="Room code" autocomplete="off" style="text-transform:uppercase">
   <button class="gold" id="joinBtn" style="width:100%; font-size:20px">Clock in</button>
   <div id="joinMsg" class="small"></div>
+  <div class="small" style="margin-top:6px">No TV?</div>
+  <button id="hostBtn" style="width:100%; background:#3a2226">Open the shop on this phone</button>
 </div>
 
 <!-- picking a job -->
@@ -143,6 +145,12 @@
   <div class="scroll pad">
     <div class="jobs" id="jobList"></div>
     <div id="rideBox" style="display:none; margin-top:10px"></div>
+    <div id="hostBox" style="display:none; margin-top:12px; text-align:center">
+      <div class="small">This phone is running the shop. Everyone else: scan this, or open the game and type</div>
+      <div id="hostCode" style="font-size:40px; font-weight:900; letter-spacing:6px; color:var(--gold)">....</div>
+      <canvas id="hostQR" width="220" height="220" style="width:180px; height:180px; background:#fff; border-radius:10px"></canvas>
+      <div class="small" style="margin-top:4px">Keep this phone's screen on and the game open: the shop stops if it sleeps. The dispatcher's map is the only map without a TV.</div>
+    </div>
     <div id="lobbyBox" style="margin-top:14px">
       <div class="small" style="margin-bottom:6px">Today at the shop</div>
       <div class="hols" id="hols"></div>
@@ -240,6 +248,8 @@
 <script src="map.js"></script>
 <script src="sim.js"></script>
 <script src="net.js"></script>
+<script src="qr.js"></script>
+<script src="host.js"></script>
 <script src="bouquet.js"></script>
 <script src="snd.js"></script>
 <script>
@@ -301,7 +311,55 @@ function connect(auto){
     }
   });
 }
+/* No TV: this phone runs the shop (host.js) and plays a job too, joined
+   to its own room through a loopback that behaves just like the network. */
+let HOSTED = null;
+$('hostBtn').onclick = () => {
+  myName = $('nameIn').value.trim().slice(0, 14) || 'Helper';
+  store('wats_name', myName);
+  askMotion();
+  if(window.WSound) WSound.unlock();
+  try { if(handle) handle.destroy(); } catch(e){}
+  HOSTED = WHost.create({tv: false, room: info => { if(info.code){ code = info.code; hostCard(); } else note(info.status || ''); }});
+  const link = HOSTED.local(myName, devId, onHost);
+  conn = {send: m => link.send(m)};
+  joined = true; retries = 0;
+  $('dot').classList.remove('off');
+  keepAwake();
+  hostCard();
+  setInterval(hostMusic, 300);
+};
+function hostUrl(){
+  const base = location.href.split('#')[0].split('?')[0];
+  return base + (WNet.isLocal() ? '?local=1' : '') + '#' + code;
+}
+function hostCard(){
+  if(!HOSTED) return;
+  $('hostBox').style.display = '';
+  const c = HOSTED.NET.code;
+  $('hostCode').textContent = c || '....';
+  const q = $('hostQR'), g = q.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, q.width, q.height);
+  if(!c) return;
+  const m = qrMatrix(hostUrl(), 'M'), n = m.length, cs = q.width / (n + 8);
+  g.fillStyle = '#000';
+  for(let i = 0; i < n; i++) for(let j = 0; j < n; j++) if(m[i][j]) g.fillRect((j + 4) * cs, (i + 4) * cs, Math.ceil(cs), Math.ceil(cs));
+}
+/* with no TV, the music plays here */
+function hostMusic(){
+  if(!HOSTED || !window.WSound) return;
+  const G = HOSTED.G, S = G.S;
+  let want = 'mainstreet';
+  if(G.phase === 'day' || G.phase === 'count') want = S.dust > 0.25 ? 'haboob' : 'rush';
+  else if(G.phase === 'end' || G.phase === 'results') want = 'closing';
+  else if(G.phase === 'parade') want = 'parade';
+  if(G.paused) want = null;
+  WSound.music(want);
+  WSound.kick();
+}
+
 function later(){
+  if(HOSTED) return;   // a hosting phone is never cut off from itself
   conn = null;
   $('dot').classList.add('off');
   if(retries > 10){ note('Lost the TV. Tap to rejoin.'); show('join'); joined = false; return; }

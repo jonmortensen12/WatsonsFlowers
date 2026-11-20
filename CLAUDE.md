@@ -23,7 +23,7 @@ and off the internet. Run the checks from the repo root.
 
 ```
 node simcheck.mjs          # the simulation, headless: handling, crashes, canal jumps, whole days, parade, then Rattlesnake Ridge (~2 min)
-node netcheck.mjs          # the TV and six phones in Chromium over ?local=1, every job (several minutes)
+node netcheck.mjs          # the TV and six phones in Chromium over ?local=1, every job, then a phone-hosted game (several minutes)
 python3 tools/bake.py      # regenerate web/geo.js after re-fetching tools/osm/roads.json
 node tools/art.mjs         # redraw the icons and link preview
 python3 tools/flowers.py   # re-cut the flower photos into web/flowers/ (Pillow, numpy, scipy)

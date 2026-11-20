@@ -39,6 +39,7 @@ carnations, daisies and fern, arranged into proper bouquets.
 | File | What it is |
 |---|---|
 | `web/index.html` | The TV. Hosts the room, runs the clock, split-screens up to six vans, the lobby, results, parade and sound. |
+| `web/host.js` | The host: the save, the room, the people and their jobs, the 60 Hz simulation clock, the day's phases, what each phone is told. Draws and plays nothing. The TV runs it; with no TV, a phone does. |
 | `web/controller.html` | The phone. One page for every job. |
 | `web/sim.js` | The simulation. Decides everything, draws nothing. Loaded by the TV, the phones (for constants) and `simcheck`. |
 | `web/map.js` | Builds the town from `geo.js` and a seed: streets, houses, porches, addresses, walls, palms, plazas, parks, canals, ramps, pickups, the road graph and routing. Same town everywhere. |
@@ -116,6 +117,24 @@ card matches what lands on the porch.
   `tools/osm/roads.json`, run `python3 tools/bake.py`.
 - Google 3D tiles are not used (their terms have no family exception, and
   the shop is gone in their imagery anyway).
+
+## No TV: a phone runs the shop
+
+"Open the shop on this phone" on the join screen. That phone runs
+`host.js` itself (`WHost.create({tv: false})`) and joins its own room
+through `host.local()`, a loopback that behaves exactly like a network
+connection (messages arrive on the next turn), so the phone plays any job
+like the others. Its jobs screen shows the room code and a QR for
+everyone else; the hosting phone plays the music (`hostMusic`); the
+dispatcher's map is the only overview. The host never marks its own
+phone away. If the hosting phone sleeps or leaves the page, the shop stops
+for everyone: it keeps a wake lock and says so on screen.
+
+The TV is the same host with hooks (`index.html`: `event`, `phase`,
+`vans`, `map`, `ticker`, `sfx`, `kbdInput`) for the drawing and the
+sound. `WTV` exposes the host's `G`, `NET`, `M` as before. netcheck runs a
+phone-hosted game at the end: a phone hosts, two join with its code, the
+host drives, the others arrange and dispatch, closing time reaches all.
 
 ## Two towns
 

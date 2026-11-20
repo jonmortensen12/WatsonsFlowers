@@ -240,6 +240,51 @@ await sleep(1500);
 ok(await tv.evaluate(() => !WTV.G.S.vans[0].owner), 'a driver who goes quiet hands the van to the computer');
 
 await tv.screenshot({path: 'netcheck-tv.png'});
+
+// ---- no TV: a phone opens the shop itself, and two more join with its code ----
+for(const pg of ctx.pages()) await pg.close();
+const ctx2 = await browser.newContext();
+const hostP = await ctx2.newPage(); watch(hostP, 'host phone');
+await hostP.setViewportSize({width: 800, height: 390});
+await hostP.goto(base + 'controller.html?local=1&norender=1');
+await hostP.fill('#nameIn', 'Mom');
+await hostP.click('#hostBtn');
+await hostP.waitForFunction(() => HOSTED && HOSTED.NET.code && document.getElementById('hostCode').textContent.length === 4, null, {polling: 250, timeout: 30000});
+const hcode = await hostP.evaluate(() => HOSTED.NET.code);
+ok(/^[A-Z0-9]{4}$/.test(hcode), 'no TV: a phone opened the shop itself, room ' + hcode + ', with its code and a QR on the jobs screen');
+async function joinPhone(name, w, h){
+  const p = await ctx2.newPage(); watch(p, name);
+  await p.setViewportSize({width: w || 390, height: h || 800});
+  await p.goto(base + 'controller.html?local=1&norender=1#' + hcode);
+  await p.fill('#nameIn', name);
+  await p.click('#joinBtn');
+  await p.waitForFunction(sel => { const e = document.querySelector(sel); return e && e.getClientRects().length > 0; }, '#jobs.on', {polling: 250, timeout: 30000});
+  return p;
+}
+const sis = await joinPhone('Sis');
+const bro = await joinPhone('Bro');
+await sleep(800);
+ok(await hostP.evaluate(() => Object.keys(HOSTED.NET.people).length) === 3, 'two more phones joined the phone-hosted shop');
+await pick(hostP, 'Driver');
+await sleep(300);
+await pick(sis, 'Arranger');
+await pick(bro, 'Dispatcher');
+await sleep(500);
+await sis.click('#startBtn');
+await hostP.waitForFunction(() => HOSTED.G.phase === 'count' || HOSTED.G.phase === 'day', null, {polling: 250, timeout: 10000});
+await hostP.waitForFunction(() => cur === 'drive' && DRV && DRV.van, null, {polling: 300, timeout: 60000});
+ok(true, 'started from a joining phone; the hosting phone is driving');
+await hostP.evaluate(() => { tilt.touch = true; document.getElementById('calib').style.display = 'none'; IN.gas = 1; });
+await sleep(4500);
+const hspd = await hostP.evaluate(() => HOSTED.G.S.vans[0].spd);
+ok(hspd > 10, "the hosting phone's own van drives in its own room: " + (hspd * 2.237).toFixed(0) + ' mph');
+await sis.waitForFunction(() => cur === 'arrange' && SNAP && SNAP.ord && SNAP.ord.length > 0, null, {polling: 300, timeout: 60000});
+ok(true, 'the arranger on another phone gets the orders');
+ok(await bro.evaluate(() => cur === 'dispatch'), 'the dispatcher has the map');
+await hostP.evaluate(() => { const S = HOSTED.G.S; S.t = S.dayLen; });
+await sis.waitForFunction(() => cur === 'results', null, {polling: 300, timeout: 60000});
+ok(true, 'closing time reaches the other phones');
+ok(await hostP.evaluate(() => HOSTED.SAVE.days > 0), 'the hosting phone keeps the family records');
 ok(errors.length === 0, 'no page errors' + (errors.length ? ':\n    ' + errors.slice(0, 8).join('\n    ') : ''));
 await browser.close();
 server.close();

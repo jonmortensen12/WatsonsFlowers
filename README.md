@@ -11,7 +11,8 @@ Ridge, a made-up town built for driving: curving roads over the hills, a
 mountain pass, an airfield up on a mesa, crests to fly off, a speedway, a
 container yard and a quarry pit.
 
-Open `index.html` on the TV, scan the QR code with phones. No phones: press
+Open `index.html` on the TV, scan the QR code with phones. No TV: on any
+phone, "Open the shop on this phone", and the others scan its code. No phones: press
 Enter and drive with the arrow keys.
 
 ## Credits

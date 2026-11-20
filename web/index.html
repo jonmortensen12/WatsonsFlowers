@@ -28,6 +28,7 @@
 <script src="map.js"></script>
 <script src="sim.js"></script>
 <script src="net.js"></script>
+<script src="host.js"></script>
 <script src="qr.js"></script>
 <script src="bouquet.js"></script>
 <script src="snd.js"></script>
@@ -53,285 +54,38 @@ const ROLES = ['drive', 'toss', 'arrange', 'grow', 'dispatch', 'cart'];
 const ROLE_NAMES = {drive: 'Driver', toss: 'Tosser', arrange: 'Arranger', grow: 'Grower', dispatch: 'Dispatcher', cart: 'Rose cart'};
 const HOLIDAYS = SIM.HOLIDAYS, HKEYS = SIM.HOLIDAY_KEYS;
 
-/* ---------------- the save ---------------- */
-let SAVE = {records: {}, days: 0, holiday: 'thanksgiving', map: 'mesa'};
-try { Object.assign(SAVE, JSON.parse(localStorage.getItem('wats_save') || '{}')); } catch(e){}
-function storeSave(){ try { localStorage.setItem('wats_save', JSON.stringify(SAVE)); } catch(e){} }
-
-/* ---------------- the town ---------------- */
-let M = WMap.town(SAVE.map);
-const G = {S: null, phase: 'lobby', paused: false, phaseT: 0, ticker: [], msgs: {}, flash: 0, recordNew: false, kbd: {}};
-function newSim(){
-  G.S = SIM.create(M, {seed: (Date.now() & 0xffff) + 1, holiday: SAVE.holiday});
-}
-newSim();
-
-/* ---------------- the room ---------------- */
-const NET = {code: null, handle: null, status: 'Opening the room...', people: {}};
+/* ---------------- the host: the save, the room, the people, the day (host.js) ----------------
+   The TV hosts, and draws and plays what happens; host.js does the rest, the
+   same code a phone runs when there is no TV. */
+const HOST = WHost.create({
+  tv: true,
+  room: () => { qrCache = null; },
+  event: e => onEvent(e),
+  phase: p => onPhase(p),
+  vans: () => { syncVans(); G.S.vans.forEach((v, i) => refreshTag(i)); },
+  map: m => onMap(m),
+  ticker: (t, c) => ticker(t, c),
+  sfx: k => sfx(k),
+  kbdInput: () => kbdInput()
+});
+const G = HOST.G, NET = HOST.NET, SAVE = HOST.SAVE;
+let M = HOST.M;
+const startDay = HOST.startDay, startParade = HOST.startParade, toLobby = HOST.toLobby, tellAll = HOST.tellAll, storeSave = HOST.storeSave;
+function setMap(k){ HOST.setMap(k); }
 function controllerUrl(){
   const base = location.href.split('#')[0].split('?')[0].replace(/[^/]*$/, '');
   return base + 'controller.html' + (WNet.isLocal() ? '?local=1' : '') + '#' + NET.code;
 }
-function openRoom(){
-  NET.status = 'Opening the room...';
-  NET.handle = WNet.host({
-    open: code => { NET.code = code; NET.status = ''; qrCache = null; },
-    conn: c => wireConn(c),
-    error: msg => { NET.status = msg + ' Retrying...'; NET.code = null; setTimeout(() => { if(!NET.code) openRoom(); }, 4000); }
-  });
-}
-function wireConn(c){
-  let id = null;
-  c.on('data', d => {
-    if(!d || typeof d !== 'object') return;
-    if(d.t === 'hello'){
-      id = String(d.dev || c.peer).slice(0, 40);
-      const old = NET.people[id];
-      if(old && old.conn && old.conn !== c){ try { old.conn.close(); } catch(e){} }
-      const p = old || {id, role: null, van: -1, ride: null, inp: {}, seen: 0, joined: performance.now()};
-      p.name = cleanName(d.name) || p.name || 'Helper';
-      p.conn = c; p.lastConn = c; p.gone = 0; p.seen = performance.now();
-      NET.people[id] = p;
-      send(p, {t: 'host', proto: PROTO, min: PROTO_MIN});
-      tellYou(p);
-      ticker(p.name + ' is here');
-      return;
-    }
-    const p = id && NET.people[id];
-    if(!p) return;
-    if(!p.conn && p.lastConn === c){ p.conn = c; p.gone = 0; seatBack(p); }
-    if(p.conn !== c) return;
-    p.seen = performance.now();
-    onPhone(p, d);
-  });
-  c.on('close', () => { const p = id && NET.people[id]; if(p && p.conn === c){ p.conn = null; p.gone = performance.now(); away(p); } });
-}
-function cleanName(n){ return String(n || '').replace(/[^\p{L}\p{N} '\-]/gu, '').trim().slice(0, 14); }
-function send(p, m){ if(p && p.conn){ try { p.conn.send(m); } catch(e){} } }
-function everyone(m){ Object.values(NET.people).forEach(p => send(p, m)); }
-function present(){ return Object.values(NET.people).filter(p => p.conn); }
-
-function sweep(){
-  const now = performance.now();
-  Object.values(NET.people).forEach(p => {
-    if(p.conn && now - p.seen > 6000){ p.conn = null; p.gone = now; away(p); }
-    if(!p.conn && now - p.gone > 30000){ release(p); delete NET.people[p.id]; }
-  });
-  countRoles();
-}
-/* a driver who goes quiet: the computer takes the wheel until they are back */
-function away(p){
-  const S = G.S;
-  if(p.role === 'drive' && p.van >= 0 && S.vans[p.van] && S.vans[p.van].owner === p.id){ SIM.setOwner(S, p.van, null); S.vans[p.van].name = p.name + ' (computer)'; }
-}
-function seatBack(p){
-  const S = G.S;
-  if(p.role === 'drive' && p.van >= 0 && S.vans[p.van] && !S.vans[p.van].owner){ SIM.setOwner(S, p.van, p.id, p.name, true); sendDrv(p); }
-  tellYou(p);
-}
-function release(p){
-  const S = G.S;
-  if(p.role === 'drive' && p.van >= 0 && S.vans[p.van] && (S.vans[p.van].owner === p.id || !S.vans[p.van].owner)){ SIM.setOwner(S, p.van, null); S.vans[p.van].name = 'Computer'; }
-}
-function countRoles(){
-  const S = G.S, r = {arr: 0, grow: 0, disp: 0, cart: 0};
-  present().forEach(p => { if(p.role === 'arrange') r.arr++; else if(p.role === 'grow') r.grow++; else if(p.role === 'dispatch') r.disp++; else if(p.role === 'cart') r.cart++; });
-  S.roles = r;
-}
-function drivers(){ return Object.values(NET.people).filter(p => p.role === 'drive').sort((a, b) => a.joined - b.joined); }
-function vanFor(p){
-  // where a tosser rides: with the driver they picked, else van 1
-  const S = G.S;
-  if(p.ride){ const d = NET.people[p.ride]; if(d && d.van >= 0 && S.vans[d.van]) return d.van; }
-  if(p.rideVan != null && S.vans[p.rideVan]) return p.rideVan;
-  return S.vans.length ? 0 : -1;
-}
-function tellYou(p){
-  const S = G.S;
-  if(p.role === 'toss') p.van = vanFor(p);
-  const drv = drivers().map(d => [d.id, d.name, d.van]);
-  const vans = S.vans.map(v => [v.i, v.name, v.color]);
-  send(p, {t: 'you', role: p.role, van: p.van, name: p.name, id: p.id, ph: G.phase, drv, vans, hol: SAVE.holiday, map: M.key});
-}
-function tellAll(){ Object.values(NET.people).forEach(tellYou); }
-/* a driver's phone takes the van from here */
-function sendDrv(p){
-  const S = G.S, v = p.van >= 0 && S.vans[p.van];
-  if(!v || !p.conn) return;
-  send(p, {t: 'drv', i: v.i, x: v.x, z: v.z, h: v.crash ? v.crash.h || v.h : v.h, color: v.color, boost: v.boost});
-}
-
-/* picking a job */
-function pick(p, role, opt){
-  const S = G.S;
-  if(ROLES.indexOf(role) < 0) return;
-  // leaving the wheel hands the van to the computer
-  if(p.role === 'drive' && role !== 'drive') release(p);
-  p.role = role; p.inp = {};
-  if(role === 'drive'){
-    if(G.phase === 'day' || G.phase === 'count'){
-      let v = S.vans.findIndex(q => !q.owner);
-      if(v < 0) v = SIM.addVan(S, p.id, p.name);
-      if(v < 0){ p.role = null; send(p, {t: 'full'}); tellYou(p); return; }
-      SIM.setOwner(S, v, p.id, p.name, true);
-      p.van = v;
-      syncVans();
-      sendDrv(p);
-    } else {
-      if(drivers().length > SIM.MAX_VANS){ p.role = null; send(p, {t: 'full'}); }
-      p.van = -1;
-    }
-  } else if(role === 'toss'){
-    p.ride = opt && opt.ride || null;
-    p.rideVan = opt && opt.van != null ? +opt.van : null;
-    p.van = vanFor(p);
-  } else p.van = -1;
-  countRoles();
-  tellAll();
-  sfx('click');
-  ticker(p.name + ' is ' + (role === 'arrange' ? 'arranging' : role === 'grow' ? 'in the garden' : role === 'dispatch' ? 'on dispatch' : role === 'cart' ? 'pushing the rose cart' : role === 'toss' ? 'riding shotgun' : 'driving'));
-}
-
-function onPhone(p, d){
-  const S = G.S;
-  switch(d.t){
-    case 'pick': pick(p, d.role, d); break;
-    case 'name': p.name = cleanName(d.name) || p.name; if(p.role === 'drive' && S.vans[p.van] && S.vans[p.van].owner === p.id){ S.vans[p.van].name = p.name; refreshTag(p.van); } tellAll(); break;
-    case 'in': if(p.role === 'drive') p.inp = d; break;
-    case 'vs': if(p.role === 'drive' && p.van >= 0 && S.vans[p.van] && S.vans[p.van].owner === p.id) SIM.remoteState(S, p.van, d.a); break;
-    case 've': if(p.role === 'drive' && p.van >= 0 && S.vans[p.van] && S.vans[p.van].owner === p.id) SIM.remoteEvent(S, p.van, d.e); break;
-    case 'act': {
-      const a = d.a; if(!a || !a.a) return;
-      const ok = {
-        claim: 'arrange', stem: 'arrange', wrap: 'arrange', ribbon: 'arrange', done: 'arrange', drop: 'arrange',
-        water: 'grow', harvest: 'grow', rose: 'cart', assign: 'dispatch', prio: 'dispatch', ping: 'dispatch'
-      }[a.a];
-      if(a.a === 'toss'){
-        if(p.role === 'drive'){ a.v = p.van; a.auto = true; }
-        else if(p.role === 'toss'){ a.v = p.van = vanFor(p); a.auto = false; }
-        else return;
-      } else if(a.a === 'ptoss'){ /* everybody throws at the parade */ }
-      else if(ok && ok !== p.role) return;
-      SIM.act(S, p.id, p.name, a);
-      break;
-    }
-    case 'start':
-      if(G.phase === 'lobby'){ if(d.hol && HOLIDAYS[d.hol]) SAVE.holiday = d.hol; if(d.map) setMap(d.map); startDay(); }
-      break;
-    case 'map':
-      if(G.phase === 'lobby') setMap(d.k);
-      break;
-    case 'hol':
-      if(G.phase === 'lobby' && HOLIDAYS[d.k]){ SAVE.holiday = d.k; storeSave(); G.S.holiday = d.k; tellAll(); sfx('click'); }
-      break;
-    case 'next':
-      if(G.phase === 'end' && G.phaseT > 3) startParade();
-      else if(G.phase === 'results' && G.phaseT > 2) toLobby();
-      break;
-    case 'pause':
-      if(G.phase === 'day'){ G.paused = !!d.v; G.S.paused = G.paused; sfx('click'); }
-      break;
+/* what the TV does as the day moves on */
+function onPhase(p){
+  if(p === 'count'){ rebuildVans(); clearFx(); musicMode('day'); }
+  else if(p === 'end'){ musicMode('results'); cue('end'); }
+  else if(p === 'parade'){ buildParade(); musicMode('parade'); }
+  else if(p === 'results') cue('cheer');
+  else if(p === 'lobby'){
+    if(parade){ scene.remove(parade.grp); scene.remove(parade.crowd); parade = null; }
+    rebuildVans(); clearFx(); musicMode('lobby');
   }
-}
-
-/* what every phone is told, ten times a second */
-function broadcast(){
-  const S = G.S;
-  const s = SIM.snap(S);
-  s.t = 's'; s.phase = G.phase; s.paused = G.paused;
-  s.ppl = Object.values(NET.people).map(p => [p.name, p.role || '', p.van, p.conn ? 1 : 0, p.id]);
-  s.rec = SAVE.records[SAVE.holiday] || 0;
-  if(G.phase === 'end' || G.phase === 'results') s.res = S.results ? {money: S.money, del: S.results.delivered, aw: S.results.awards, cheers: S.cheers} : null;
-  everyone(s);
-  // the van's own numbers for its driver and tossers
-  Object.values(NET.people).forEach(p => {
-    if((p.role === 'drive' || p.role === 'toss') && p.van >= 0 && S.vans[p.van]){
-      const vi = SIM.vanInfo(S, p.van);
-      vi.t = 'v'; vi.i = p.van;
-      send(p, vi);
-    }
-  });
-}
-
-/* ---------------- the day ---------------- */
-function startDay(){
-  const S = G.S = SIM.create(M, {seed: (Date.now() & 0xffff) + 1, holiday: SAVE.holiday});
-  drivers().slice(0, SIM.MAX_VANS).forEach(p => {
-    const v = SIM.addVan(S, p.conn ? p.id : null, p.name);
-    if(p.conn) SIM.setOwner(S, v, p.id, p.name, true);
-    p.van = v;
-  });
-  if(!S.vans.length) SIM.addVan(S, null, 'Computer');
-  if(G.kbdDriver && !S.vans[0].owner){ SIM.setOwner(S, 0, 'kbd', 'Keyboard'); }
-  countRoles();
-  SIM.start(S, SAVE.holiday);
-  G.phase = 'count'; G.phaseT = 0; G.paused = false; G.recordNew = false;
-  rebuildVans();
-  clearFx();
-  tellAll();
-  drivers().forEach(sendDrv);
-  musicMode('day');
-}
-function endOfDay(){
-  G.phase = 'end'; G.phaseT = 0;
-  const S = G.S;
-  const best = SAVE.records[S.holiday] || 0;
-  if(S.money > best){ SAVE.records[S.holiday] = S.money; G.recordNew = true; }
-  SAVE.days++;
-  storeSave();
-  tellAll();
-  musicMode('results');
-  cue('end');
-}
-function startParade(){
-  SIM.startParade(G.S);
-  G.phase = 'parade'; G.phaseT = 0;
-  buildParade();
-  tellAll();
-  musicMode('parade');
-}
-function toLobby(){
-  G.phase = 'lobby'; G.phaseT = 0;
-  if(parade){ scene.remove(parade.grp); scene.remove(parade.crowd); parade = null; }
-  newSim();
-  Object.values(NET.people).forEach(p => { if(p.role === 'drive') p.van = -1; });
-  rebuildVans();
-  clearFx();
-  tellAll();
-  musicMode('lobby');
-}
-
-/* ---------------- the clock ---------------- */
-let lastT = performance.now(), acc = 0, simTime = 0;
-function tick(){
-  const now = performance.now();
-  acc += Math.min(0.25, (now - lastT) / 1000);
-  lastT = now;
-  while(acc >= DT){
-    acc -= DT;
-    stepOnce();
-  }
-}
-function stepOnce(){
-  const S = G.S;
-  G.phaseT += DT;
-  // inputs: phones and the keyboard
-  if(G.phase === 'day' || G.phase === 'count'){
-    Object.values(NET.people).forEach(p => {
-      if(p.role === 'drive' && p.van >= 0 && S.vans[p.van] && S.vans[p.van].owner === p.id) SIM.input(S, p.van, p.inp);
-    });
-    if(S.vans[0] && S.vans[0].owner === 'kbd') SIM.input(S, 0, kbdInput());
-  }
-  // remember where everything was, for smooth drawing
-  S.vans.forEach(v => { v.px = v.x; v.pz = v.z; v.py = v.y; v.ph = v.h; });
-  SIM.step(S);
-  simTime += DT;
-  S.ev.forEach(onEvent);
-  if(G.phase === 'count' && S.ph === 'day'){ G.phase = 'day'; G.phaseT = 0; }
-  if(G.phase === 'day' && S.ph === 'end') endOfDay();
-  if(G.phase === 'parade' && S.ph === 'results'){ G.phase = 'results'; G.phaseT = 0; tellAll(); cue('cheer'); }
-  if(G.phase === 'end' && G.phaseT > 14) startParade();
-  if(G.phase === 'results' && G.phaseT > 60) toLobby();
 }
 
 /* ---------------- keyboard ---------------- */
@@ -367,7 +121,7 @@ addEventListener('keydown', e => {
   if(e.code === 'KeyM') toggleMute();
   if(e.code === 'KeyF'){ if(document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().catch(() => {}); }
   if(e.code === 'KeyT' && G.phase === 'lobby'){ const ks = WMap.TOWNS.map(q => q.k); setMap(ks[(ks.indexOf(M.key) + 1) % ks.length]); }
-  if(e.code === 'KeyH' && G.phase === 'lobby'){ const i = (HKEYS.indexOf(SAVE.holiday) + 1) % HKEYS.length; SAVE.holiday = HKEYS[i]; G.S.holiday = SAVE.holiday; storeSave(); tellAll(); }
+  if(e.code === 'KeyH' && G.phase === 'lobby') HOST.setHoliday(HKEYS[(HKEYS.indexOf(SAVE.holiday) + 1) % HKEYS.length]);
 });
 addEventListener('keyup', e => { G.kbd[e.code] = false; });
 addEventListener('blur', () => { G.kbd = {}; });
@@ -388,19 +142,14 @@ let world = buildWorld(scene, M);
 let V = createView(scene, M);
 /* the town, swapped in the lobby: everything in the scene is the town's,
    so it all goes and the new town is built in its place */
-function setMap(key){
-  if(G.phase !== 'lobby' || WMap.townInfo(key).k === M.key) return;
-  SAVE.map = WMap.townInfo(key).k; storeSave();
-  scene.traverse(o => { if(o.geometry) o.geometry.dispose(); if(o.material) [].concat(o.material).forEach(m => { if(m.map) m.map.dispose(); m.dispose(); }); });
+function onMap(m){
+  M = m;
+  scene.traverse(o => { if(o.geometry) o.geometry.dispose(); if(o.material) [].concat(o.material).forEach(q => { if(q.map) q.map.dispose(); q.dispose(); }); });
   while(scene.children.length) scene.remove(scene.children[0]);
-  M = WMap.town(SAVE.map);
   world = buildWorld(scene, M);
   V = createView(scene, M);
   pingObjs.length = 0; parade = null; mapCache = null; brokenShown = {};
-  newSim();
   rebuildVans();
-  tellAll();
-  sfx('click');
 }
 const hud = document.getElementById('hud'), H = hud.getContext('2d');
 let VW = 0, VH = 0, DPR = 1;
@@ -505,37 +254,15 @@ function cheerNear(x, z){ if(parade) parade.people.forEach(p => { if(Math.hypot(
 function vanName(i){ const v = G.S.vans[i]; return v ? v.name : 'A van'; }
 function nameOf(id){ const p = NET.people[id] || G.S.ppl[id]; return p ? p.name : 'Someone'; }
 function ticker(text, color){ G.ticker.push({text, color: color || '#fff', t: 0}); if(G.ticker.length > 6) G.ticker.shift(); }
-function phoneFx(vanI, k, extra){
-  Object.values(NET.people).forEach(p => { if((p.role === 'drive' || p.role === 'toss') && p.van === vanI) send(p, Object.assign({t: 'fx', k}, extra || {})); });
-}
 /* the action cam goes where the action is */
 function feature(i, secs, why, color){
   const S = G.S; if(!S.vans[i]) return;
   if(G.feat && G.feat.until > wallT && G.feat.prio > secs && G.feat.i !== i) return;
   G.feat = {i, until: wallT + secs, why, color: color || '#fff', prio: secs, t0: wallT};
 }
-/* what each driver's phone gets told about (near its van) */
-const pendingEv = {};
-const LOOK = {crash: 1, carhit: 1, smash: 1, land: 1, toss: 1, boom: 1, goonhit: 1, splash: 1, mist: 1, thud: 1};
-function shareEvent(e){
-  if(e.k === 'goons' || e.k === 'haboob'){   // news every driver hears, wherever they are
-    Object.values(NET.people).forEach(p => { if(p.role === 'drive' && p.van >= 0) (pendingEv[p.id] || (pendingEv[p.id] = [])).push({k: e.k}); });
-    return;
-  }
-  if(!LOOK[e.k] || e.x == null) return;
-  Object.values(NET.people).forEach(p => {
-    if(p.role !== 'drive' || p.van < 0) return;
-    const v = G.S.vans[p.van]; if(!v) return;
-    if((e.k === 'crash' || e.k === 'smash' || e.k === 'thud') && e.v === p.van) return;   // it saw its own
-    if(Math.hypot(e.x - v.x, e.z - v.z) > 320) return;
-    const q = pendingEv[p.id] || (pendingEv[p.id] = []);
-    if(q.length < 30) q.push(e);
-  });
-}
 function onEvent(e){
   const S = G.S;
   if(!NORENDER){ V.holiday = S.holiday; V.event(e); }
-  shareEvent(e);
   switch(e.k){
     case 'count': cue('count'); break;
     case 'go': cue('go'); ticker("Watson's is open!", '#f2c531'); break;
@@ -543,7 +270,6 @@ function onEvent(e){
       feature(e.v, 5, e.cause === 'canal' ? 'IN THE CANAL!' : 'CRASH!', '#ff5a5a');
       sfx(e.cause === 'canal' ? 'splash' : 'crash', e.imp);
       if(e.kaboom) sfx('boom');
-      phoneFx(e.v, 'crash', {lost: e.lost});
       ticker(vanName(e.v) + ' crashed' + (e.cause === 'canal' ? ' into the canal' : '') + (e.lost.length ? ' - ' + e.lost.length + ' bouquets everywhere' : ''), '#ff8a8a');
       mapFx.push({x: e.x, z: e.z, t: 0, k: 'crash', n: e.lost.length});
       break;
@@ -551,7 +277,7 @@ function onEvent(e){
     case 'bump': sfx('bump', e.imp); break;
     case 'smash': world.setProp(e.p, false); brokenShown[e.p] = true; sfx('smash'); break;
     case 'wall': world.setWall(e.b, false); sfx('wall'); break;
-    case 'dent': sfx('dent'); phoneFx(e.v, 'dent', {dmg: e.dmg}); break;
+    case 'dent': sfx('dent'); break;
     case 'carhit': sfx('carhit', e.big > 0.6); if(e.boom) sfx('boom'); break;
     case 'carbounce': sfx('carbounce'); break;
     case 'near': feature(e.v, 1.6, 'NEAR MISS!', '#7fe0ff'); sfx('whoosh'); break;
@@ -565,25 +291,23 @@ function onEvent(e){
           ticker((e.who && e.who !== (S.vans[vv] && S.vans[vv].owner) ? nameOf(e.who) : vanName(vv)) + ' delivered to ' + e.cust + ' - $' + e.pay, '#b8ffb0');
           mapFx.push({x: e.x, z: e.z, t: 0, k: 'paid', pay: e.pay});
         }
-        phoneFx(vv, 'land', {how: e.how, pay: e.pay});
       } else if(e.air > 1){ feature(e.v, 3, e.air.toFixed(1) + 's OF AIR!', '#ffd23f'); sfx('thud'); }
       break;
     case 'toss': sfx('toss'); break;
-    case 'nothing': phoneFx(e.v, 'nothing'); break;
-    case 'load': sfx('load'); phoneFx(e.v, 'load', {n: e.n}); break;
-    case 'mist': sfx('mist'); phoneFx(e.v, 'mist'); break;
-    case 'ice': sfx('load'); phoneFx(e.v, 'ice'); break;
-    case 'powder': sfx('fuse'); phoneFx(e.v, 'powder'); feature(e.v, 4, 'BLACK POWDER!', '#ff7a1a'); break;
+    case 'nothing': break;
+    case 'load': sfx('load'); break;
+    case 'mist': sfx('mist'); break;
+    case 'ice': sfx('load'); break;
+    case 'powder': sfx('fuse'); feature(e.v, 4, 'BLACK POWDER!', '#ff7a1a'); break;
     case 'boom':
       sfx('boom'); sfx('splash');
       feature(e.v, 6, "GRANDPA'S CANAL BLAST!", '#ff7a1a');
       ticker(e.name + " set off Grandpa's black powder at the canal. Just like 1950-something.", '#ffb27a');
-      phoneFx(e.v, 'boom');
       mapFx.push({x: e.x, z: e.z, t: 0, k: 'boom'});
       break;
     case 'goons': ticker('School is out. The Gilbert Goons are on their scooters.', '#ffb3b3'); cue('goons'); break;
-    case 'gooned': feature(e.v, 3, 'GOONED! ' + e.name + ' took a bouquet', '#ff5a5a'); sfx('goon'); phoneFx(e.v, 'gooned'); ticker(e.name + ' swiped a bouquet off ' + vanName(e.v), '#ff8a8a'); break;
-    case 'goonhit': feature(e.v, 2.5, e.rec ? 'GOT IT BACK!' : 'GOON DOWN!', '#7dff6b'); sfx('bonk'); phoneFx(e.v, 'goonhit', {rec: e.rec}); break;
+    case 'gooned': feature(e.v, 3, 'GOONED! ' + e.name + ' took a bouquet', '#ff5a5a'); sfx('goon'); ticker(e.name + ' swiped a bouquet off ' + vanName(e.v), '#ff8a8a'); break;
+    case 'goonhit': feature(e.v, 2.5, e.rec ? 'GOT IT BACK!' : 'GOON DOWN!', '#7dff6b'); sfx('bonk'); break;
     case 'getaway': ticker(e.name + ' got away with a bouquet', '#ff8a8a'); break;
     case 'splash': sfx('splash'); break;
     case 'haboob': ticker('HABOOB! A wall of dust is rolling in off the desert', '#e0b07a'); cue('haboob'); break;
@@ -601,40 +325,6 @@ function onEvent(e){
   }
 }
 
-/* ---------------- each driver's phone: the world around its van ---------------- */
-function worldTick(){
-  const S = G.S;
-  const live = G.phase === 'day' || G.phase === 'count';
-  const pk = M.pickups.filter(q => (S.pickupT[q.id] || 0) > S.t || (q.k === 'boom' && S.boomUsed)).map(q => q.id);
-  if(S.boomUsed) pk.push(-1);
-  const br = Object.keys(S.broken).map(Number), bw = Object.keys(S.wallsDown).map(Number);
-  const r1 = n => Math.round(n * 10) / 10, r2 = n => Math.round(n * 100) / 100;
-  Object.values(NET.people).forEach(p => {
-    if(p.role !== 'drive' || !p.conn) return;
-    const v = p.van >= 0 && S.vans[p.van];
-    const w = {t: 'w', st: r2(S.t), clk: r2(S.clock), dust: r2(S.dust), gx: r1(S.gust.x), gz: r1(S.gust.z), ph: live ? S.ph : G.phase, hol: S.holiday, br, pk, bw};
-    if(v){
-      w.cars = [];
-      S.cars.forEach(c => {
-        if(Math.abs(c.x - v.x) > 280 || Math.abs(c.z - v.z) > 280) return;
-        const a = [c.id, r1(c.x), r1(c.z), r2(c.h), r1(c.v), SIM.CAR_KINDS.findIndex(k => k.k === c.kind), c.color];
-        if(c.wreck) a.push(r2(c.wreck.y), r2(c.wreck.ax), r2(c.wreck.ay), r2(c.wreck.az));
-        w.cars.push(a);
-      });
-      w.vans = S.vans.filter(o => o !== v).map(o => {
-        const a = [o.i, r1(o.x), r1(o.z), r2(o.y), r2(o.crash && o.crash.h != null ? o.crash.h : o.h), o.i, o.name];
-        if(o.crash) a.push(r2(o.crash.ax || 0), r2(o.crash.ay || 0), r2(o.crash.az || 0));
-        return a;
-      });
-      w.goons = S.goons.filter(g => g.st !== 'gone' && Math.abs(g.x - v.x) < 280 && Math.abs(g.z - v.z) < 280)
-        .map(g => [r1(g.x), r2(g.y || 0), r1(g.z), r2(g.h), g.st === 'flung' ? 2 : g.st === 'flee' ? 1 : 0, r2(g.spin || 0), g.color, g.carry != null ? 1 : 0]);
-      w.tgt = v.tgt ? {k: v.tgt.k, id: v.tgt.id} : null;
-    }
-    if(pendingEv[p.id] && pendingEv[p.id].length){ w.ev = pendingEv[p.id]; pendingEv[p.id] = []; }
-    send(p, w);
-  });
-}
-
 /* ---------------- drawing ---------------- */
 const overview = new THREE.PerspectiveCamera(50, 1, 1, 6000);
 const actionCam = new THREE.PerspectiveCamera(66, 16 / 9, 0.8, 6000);
@@ -645,7 +335,7 @@ function frame(){
   const now = performance.now(), dt = Math.min(0.1, (now - frameT) / 1000);
   frameT = now; wallT += dt; frameDt = dt;
   const S = G.S;
-  const alpha = Math.max(0, Math.min(1, acc / DT));
+  const alpha = HOST.alpha();
   const hour = G.phase === 'lobby' ? 19.2 : G.phase === 'parade' || G.phase === 'results' ? 19.6 : G.phase === 'end' ? 20 : S.clock;
   const dust = G.phase === 'day' || G.phase === 'end' ? S.dust : 0;
   const wind = {x: S.gust.x * dust * 2, z: S.gust.z * dust * 2};
@@ -1233,11 +923,6 @@ function drawSoundPill(){
 
 /* ---------------- go ---------------- */
 resize();
-openRoom();
-setInterval(tick, 1000 / 60);
-setInterval(broadcast, 100);
-setInterval(sweep, 1000);
-setInterval(worldTick, 50);
 setInterval(() => { engineTick(); musicTick(); }, 100);
 rebuildVans();
 requestAnimationFrame(frame);
