@@ -130,6 +130,13 @@ dispatcher's map is the only overview. The host never marks its own
 phone away. If the hosting phone sleeps or leaves the page, the shop stops
 for everyone: it keeps a wake lock and says so on screen.
 
+The link itself (`/`, `index.html`) sends a phone straight to
+`controller.html` (a coarse pointer and a screen under 600 px), so opening
+the game on a phone always gives a way to play. `?tv=1` keeps the TV page on
+any device; the phone page links to it ("Use this screen as the TV
+instead"), and a tablet on the TV page gets a "Playing on this device?"
+button in the lobby.
+
 The TV is the same host with hooks (`index.html`: `event`, `phase`,
 `vans`, `map`, `ticker`, `sfx`, `kbdInput`) for the drawing and the
 sound. `WTV` exposes the host's `G`, `NET`, `M` as before. netcheck runs a

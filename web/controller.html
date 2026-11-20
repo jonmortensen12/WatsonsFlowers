@@ -137,6 +137,7 @@
   <div id="joinMsg" class="small"></div>
   <div class="small" style="margin-top:6px">No TV?</div>
   <button id="hostBtn" style="width:100%; background:#3a2226">Open the shop on this phone</button>
+  <a class="small" id="tvLink" href="index.html?tv=1" style="margin-top:10px; color:#c9a9b0">Use this screen as the TV instead</a>
 </div>
 
 <!-- picking a job -->
@@ -314,6 +315,7 @@ function connect(auto){
 /* No TV: this phone runs the shop (host.js) and plays a job too, joined
    to its own room through a loopback that behaves just like the network. */
 let HOSTED = null;
+$('tvLink').href = 'index.html?tv=1' + (WNet.isLocal() ? '&local=1' : '');
 $('hostBtn').onclick = () => {
   myName = $('nameIn').value.trim().slice(0, 14) || 'Helper';
   store('wats_name', myName);

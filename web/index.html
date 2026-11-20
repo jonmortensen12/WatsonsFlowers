@@ -4,6 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Watson's Flowers</title>
+<script>
+/* A phone that opens the link is a player, not the TV: straight to the phone
+   page, which can join a room or open the shop itself. ?tv=1 keeps this page
+   on any device (a tablet as the TV). */
+(function(){
+  var q = location.search, coarse = window.matchMedia && matchMedia('(pointer: coarse)').matches;
+  if(coarse && Math.min(screen.width, screen.height) < 600 && !/[?&]tv=1/.test(q)) location.replace('controller.html' + q + location.hash);
+})();
+</script>
 <meta name="description" content="A family delivery game: Watson's Flowers, Mesa and Gilbert, Arizona. The TV is the town, every phone is a job.">
 <meta property="og:title" content="Watson's Flowers">
 <meta property="og:description" content="Deliver the flowers. Mind the goons.">
@@ -20,6 +29,11 @@
 </style>
 </head>
 <body>
+<a id="playHere" href="controller.html">Playing on this device? Tap here</a>
+<style>
+  #playHere { display: none; position: fixed; right: 12px; top: 12px; z-index: 20; padding: 12px 16px; border-radius: 12px; background: #f2c531; color: #3a2a00; font: bold 16px system-ui, sans-serif; text-decoration: none; }
+  @media (pointer: coarse) { #playHere.lobby { display: block; } }
+</style>
 <canvas id="gl"></canvas>
 <canvas id="hud"></canvas>
 <div id="loading">Opening the shop...</div>
@@ -78,6 +92,7 @@ function controllerUrl(){
 }
 /* what the TV does as the day moves on */
 function onPhase(p){
+  const ph = document.getElementById('playHere'); if(ph && p !== 'lobby') ph.classList.remove('lobby');
   if(p === 'count'){ rebuildVans(); clearFx(); musicMode('day'); }
   else if(p === 'end'){ musicMode('results'); cue('end'); }
   else if(p === 'parade'){ buildParade(); musicMode('parade'); }
@@ -784,6 +799,8 @@ function drawQR(x, y, size){
   for(let i = 0; i < n; i++) for(let j = 0; j < n; j++) if(m[i][j]) H.fillRect(x + (j + 4) * c, y + (i + 4) * c, Math.ceil(c), Math.ceil(c));
 }
 function drawLobby(){
+  const ph = document.getElementById('playHere');
+  if(ph && !ph.classList.contains('lobby')){ ph.classList.add('lobby'); ph.href = 'controller.html' + (WNet.isLocal() ? '?local=1' : ''); }
   const W = VW, Hh = VH, u = Math.max(0.55, Math.min(W / 1600, Hh / 900)), pad = Math.round(24 * u);
   const fit = (t, maxW) => { if(H.measureText(t).width <= maxW) return t; while(t.length > 1 && H.measureText(t + '…').width > maxW) t = t.slice(0, -1); return t + '…'; };
   // the join code: a card on the right
