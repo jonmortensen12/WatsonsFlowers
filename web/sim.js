@@ -16,8 +16,8 @@
 var DT = 1 / 60;
 var DAY_LEN = 420;                 // seconds, 8:00 to 20:00
 var CAP = 6;                       // bouquets a van carries
-var CRASH_V = 24;                  // m/s into something solid (less than this dents the van)
-var CRASH_CAR = 20;                // m/s closing on a car
+var CRASH_V = 30;                  // m/s into something solid (~67 mph; less than this dents the van)
+var CRASH_CAR = 26;                // m/s closing on a car (~58 mph)
 var G = 22;                        // gravity, a little arcade-heavy
 var MAX_VANS = 6;
 
@@ -541,6 +541,24 @@ var SURF_DRAG = [2.4, 1, 2.0, 1, 1, 1.3, 3];
 var scratch = {b: [], c: [], p: []};
 var stamp = new Uint32Array(1 << 16), stampN = 1;
 
+/* on a two-way road, in the lanes coming the other way? */
+function wrongSide(M, v, fx, fz){
+  for(var k = 0; k < M.lines.length; k++){
+    var l = M.lines[k];
+    if(l.pts && !l.axis){
+      var bb = l.bb || (l.bb = l.pts.reduce(function(b, p){ return [Math.min(b[0], p[0]), Math.min(b[1], p[1]), Math.max(b[2], p[0]), Math.max(b[3], p[1])]; }, [1e9, 1e9, -1e9, -1e9]));
+      if(v.x < bb[0] - l.w || v.x > bb[2] + l.w || v.z < bb[1] - l.w || v.z > bb[3] + l.w) continue;
+    }
+    var n = M.lineNear(l, v.x, v.z);
+    if(n.d > l.w / 2) continue;
+    var p = M.linePoint(l, n.s), along = fx * p.dx + fz * p.dz;
+    if(Math.abs(along) < 0.7) continue;            // across it, not along it
+    var lat = (v.x - p.x) * -p.dz + (v.z - p.z) * p.dx;
+    return lat * (along > 0 ? 1 : -1) < -1.5;
+  }
+  return false;
+}
+
 function vanPhysics(S, v){
   var M = S.M;
   var sf = M.surf(v.x, v.z);
@@ -595,7 +613,16 @@ function vanPhysics(S, v){
     // pull the van round - which is what lets it slide
     v.vx = fx * vf + rx * vs; v.vz = fz * vf + rz * vs;
     v.h += v.yaw * DT;
-    // driving on the wrong side of an arterial at speed fills the boost
+    // driving on the wrong side of the road at speed slowly fills the boost
+    if(vf > 12 && sf === 1){
+      v.wsT = (v.wsT || 0) - 1;
+      if(v.wsT <= 0){ v.wsT = 6; v.wrong = wrongSide(M, v, fx, fz); }
+      if(v.wrong){
+        v.boost = Math.min(1, v.boost + DT * 0.09);
+        v.wrongT = (v.wrongT || 0) + DT;
+        if(v.wrongT > 0.6 && !v.wrongSaid){ v.wrongSaid = true; emit(S, {k: 'wrongway', v: v.i}); }
+      } else { v.wrongT = 0; v.wrongSaid = false; }
+    } else { v.wrong = false; v.wrongT = 0; v.wrongSaid = false; }
   } else {
     v.yaw *= 0.995;
     v.yaw += v.st * 0.6 * DT;
@@ -698,7 +725,7 @@ function collideStatic(S, v, ox, oz){
   if(worst.imp > CRASH_V && v.ghost <= 0){ crash(S, v, worst.k, worst.imp, worst.nx, worst.nz); return; }
   // under that, it dents; dent it enough and it is a wreck anyway
   if(worst.imp > 4 && v.ghost <= 0){
-    dent(S, v, worst.imp * 0.009);
+    dent(S, v, worst.imp * 0.007);
     if(v.dmg >= 1){ crash(S, v, 'wrecked', Math.max(worst.imp, 20), worst.nx, worst.nz); return; }
   }
   // a glancing blow: bounce off, keep going along the wall

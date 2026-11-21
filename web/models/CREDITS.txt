@@ -1,0 +1,8 @@
+3D models by Quaternius (quaternius.com), CC0 1.0 - public domain.
+Single-file GLB copies from github.com/trebeljahr/quaternius-showcase.
+
+Ultimate Nature pack: PalmTree_1, PalmTree_3, Cactus_2, Cactus_3, Cactus_4,
+  CactusFlowers_2, CommonTree_1, PineTree_1, Bush_1, Bush_2, BushBerries_1,
+  Rock_1, Rock_2, Rock_4
+Street pack: Streetlight_Single, Sign_Stop
+Ultimate Modular Men / Women: Punk (Punk_Male, Punk_Female)

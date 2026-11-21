@@ -1491,12 +1491,27 @@ function build(G, seed){
 
   /* a random spot on a road, facing along it (for a respawn) */
   M.roadSpot = function(x, z){
-    var ne = M.nearestEdge(x, z);
-    if(!ne) return {x: x, z: z, h: 0};
-    var A = nodes[ne.e.a], B = nodes[ne.e.b];
-    var dx = B.x - A.x, dz = B.z - A.z, L2 = dx * dx + dz * dz;
-    var t = L2 > 0 ? Math.max(0.1, Math.min(0.9, ((x - A.x) * dx + (z - A.z) * dz) / L2)) : 0;
-    return {x: A.x + dx * t, z: A.z + dz * t, h: Math.atan2(dz, dx), e: ne.e};
+    // the nearest road, however far (the middle of a lake is a long way from one),
+    // and a dry bit of it (never back into the water)
+    var ne = M.nearestEdge(x, z), best = null;
+    var cand = ne ? [ne.e] : [];
+    if(!ne || M.surf(x, z) === SURF.WATER){
+      var ord = edges.map(function(e){ var A = nodes[e.a], B = nodes[e.b]; return {e: e, d: distSeg(x, z, A.x, A.z, B.x, B.z)}; }).sort(function(a, b){ return a.d - b.d; });
+      cand = cand.concat(ord.slice(0, 12).map(function(q){ return q.e; }));
+    }
+    for(var k = 0; k < cand.length && !best; k++){
+      var e = cand[k], A = nodes[e.a], B = nodes[e.b];
+      var dx = B.x - A.x, dz = B.z - A.z, L2 = dx * dx + dz * dz;
+      var t0 = L2 > 0 ? Math.max(0.1, Math.min(0.9, ((x - A.x) * dx + (z - A.z) * dz) / L2)) : 0;
+      for(var q = 0; q < 9 && !best; q++){
+        var t = Math.max(0.1, Math.min(0.9, t0 + (q % 2 ? 1 : -1) * Math.ceil(q / 2) * 0.1));
+        var px = A.x + dx * t, pz = A.z + dz * t;
+        var dry = true;
+        for(var a2 = 0; a2 < 8; a2++) if(M.surf(px + Math.cos(a2 * 0.785) * 7, pz + Math.sin(a2 * 0.785) * 7) === SURF.WATER){ dry = false; break; }
+        if(dry && M.surf(px, pz) !== SURF.WATER) best = {x: px, z: pz, h: Math.atan2(dz, dx), e: e};
+      }
+    }
+    return best || (ne ? {x: nodes[ne.e.a].x, z: nodes[ne.e.a].z, h: 0, e: ne.e} : {x: x, z: z, h: 0});
   };
 
   /* traffic lanes: every non-residential line, both ways */

@@ -102,6 +102,16 @@ await sleep(2500);
 const spd = await tv.evaluate(() => WTV.G.S.vans[0].spd);
 ok(spd > 10, 'holding GAS on the phone drives the van: ' + (spd * 2.237).toFixed(0) + ' mph');
 await dad.mouse.up();
+// thumbs: the steering slider is there, and sliding right on it steers right
+ok(await dad.evaluate(() => document.getElementById('drive').classList.contains('thumbs') && getComputedStyle(document.getElementById('bSteer')).display !== 'none'), 'No tilting gives the thumb controls: a steering slider for the left thumb');
+const sp = await dad.locator('#bSteer').boundingBox();
+await dad.mouse.move(sp.x + sp.width * 0.4, sp.y + sp.height / 2);
+await dad.mouse.down();
+await dad.mouse.move(sp.x + sp.width * 0.85, sp.y + sp.height / 2, {steps: 6});
+const thumbSt = await dad.evaluate(() => tiltSteer());
+await dad.mouse.up();
+const thumbBack = await dad.evaluate(() => tiltSteer());
+ok(thumbSt > 0.5 && thumbBack === 0, 'sliding the thumb right steers right (' + thumbSt.toFixed(2) + '), letting go centres it');
 
 // Aunt: claim the first order and make it exactly
 await aunt.waitForFunction(sel => { const e = document.querySelector(sel); return e && e.getClientRects().length > 0; }, '#aList .card', {polling: 250, timeout: 30000});

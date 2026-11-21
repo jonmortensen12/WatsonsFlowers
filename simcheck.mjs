@@ -318,5 +318,31 @@ for(const [n, o] of runs){
   ok(S.ph === 'results' && hits > 20, 'the parade goes down Gilbert Road on the Ridge too: ' + hits + ' of ' + n);
 }
 
+/* wrong side of the road fills the boost; the right side does not */
+{
+  const S = testVan(6), v = S.vans[0];
+  S.opts.noTraffic = true;
+  const l = M.lines.find(q => q.kind === 'art' && q.axis === 'ew'), x0 = 900;
+  const run = side => {
+    place(v, x0, l.p + side * 5, 0, 25); v.boost = 0; v.ghost = 99; v.wsT = 0;
+    for(let i = 0; i < 60 * 3; i++){ S.cars.length = 0; WSim.input(S, 0, {st: 0, gas: 0}); WSim.step(S); v.z = l.p + side * 5; v.h = 0; v.vz = 0; v.vx = 25; }
+    return v.boost;
+  };
+  const wrong = run(-1), right = run(1);
+  ok(wrong > 0.2 && right < 0.05, 'three seconds on the wrong side of ' + l.names[0].name + ' fills ' + Math.round(wrong * 100) + '% boost (right side: ' + Math.round(right * 100) + '%)');
+}
+/* into the lake: back out on a dry road, not into the water again */
+{
+  const F = WMap.town('ridge');
+  const S = WSim.create(F, {seed: 2}); WSim.addVan(S, 'me', 'T'); WSim.start(S);
+  for(let i = 0; i < 200; i++) WSim.step(S);
+  const v = S.vans[0]; S.opts.noTraffic = true;
+  const lake = F.ponds[0];
+  place(v, lake.x, lake.z + lake.rz + 6, -Math.PI / 2, 15); v.y = F.height(v.x, v.z); v.ghost = 0;
+  let wet = 0;
+  for(let i = 0; i < 60 * 20; i++){ S.cars.length = 0; WSim.input(S, 0, {st: 0, gas: 1}); WSim.step(S); S.ev.forEach(e => { if(e.k === 'crash' && e.cause === 'canal') wet++; }); }
+  ok(wet === 1, 'into the lake with the gas held: one splash, then back on a dry road (' + wet + ' splashes in 20 s)');
+}
+
 console.log(fails ? `\n${fails} FAILED` : '\nall good');
 process.exit(fails ? 1 : 0);

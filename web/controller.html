@@ -47,8 +47,19 @@
   .dz { position: absolute; display: flex; align-items: center; justify-content: center; font-weight: 900; border-radius: 20px; font-size: 18px; letter-spacing: 1px; border: 2px solid rgba(255,255,255,0.35); text-shadow: 0 1px 3px #000; }
   #bGas { right: 10px; bottom: 10px; width: 20%; height: 52%; background: rgba(46,139,87,0.45); }
   #bBrk { left: 10px; bottom: 10px; width: 20%; height: 52%; background: rgba(161,58,58,0.45); }
-  #bBst { right: 10px; top: 10px; width: 20%; height: 34%; background: rgba(47,111,176,0.45); }
-  #bTos { left: 10px; top: 10px; width: 20%; height: 34%; background: rgba(106,58,74,0.5); }
+  /* tilting: boost on the left, over the brake, so the right thumb can stay on the gas */
+  #bBst { left: 10px; top: 10px; width: 20%; height: 34%; background: rgba(47,111,176,0.45); }
+  #bTos { right: 10px; top: 10px; width: 20%; height: 34%; background: rgba(106,58,74,0.5); }
+  /* thumbs: the left thumb steers on a slider, the right has the pedals and boost */
+  #bSteer { display: none; position: absolute; left: 10px; bottom: 52px; width: 40%; height: 50%; border-radius: 20px; border: 2px solid rgba(255,255,255,0.35); background: rgba(20,20,30,0.35); touch-action: none; }
+  #bSteer .track { position: absolute; left: 8%; right: 8%; top: 50%; height: 8px; margin-top: -4px; border-radius: 4px; background: rgba(255,255,255,0.3); }
+  #bSteer .knob { position: absolute; top: 50%; left: 50%; width: 64px; height: 64px; margin: -32px 0 0 -32px; border-radius: 50%; background: rgba(242,197,49,0.85); box-shadow: 0 2px 8px #000; }
+  #bSteer .lab { position: absolute; left: 0; right: 0; bottom: 10px; text-align: center; font-weight: 900; font-size: 14px; letter-spacing: 1px; opacity: 0.8; text-shadow: 0 1px 3px #000; }
+  #drive.thumbs #bSteer { display: block; }
+  #drive.thumbs #bBrk { left: auto; right: calc(20% + 20px); bottom: 52px; width: 15%; height: 36%; }
+  #drive.thumbs #bBst { left: auto; right: 10px; }
+  #drive.thumbs #bTos { right: auto; left: 10px; height: 30%; }
+  #drive.thumbs #wheel { display: none; }
   .dz.down { filter: brightness(1.8); }
   #dmid { position: absolute; left: 22%; right: 22%; top: 0; bottom: 0; }
   #dtop { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); max-width: 56%; display: flex; align-items: center; gap: 8px; background: rgba(20,10,14,0.65); padding: 5px 12px; border-radius: 14px; font-weight: 800; font-size: 14px; white-space: nowrap; pointer-events: none; }
@@ -173,17 +184,18 @@
   <div id="dmsg"></div>
   <canvas id="wheel" width="240" height="240"></canvas>
   <div id="dbot"><div id="dspd">0 <small>mph</small></div><div class="bar"><div id="dbst"></div></div><div class="bar" id="ddmgbar"><div id="ddmg"></div></div><div id="dcargo"></div></div>
+  <div id="bSteer"><div class="track"></div><div class="knob"></div><div class="lab">SLIDE TO STEER</div></div>
   <div class="dz" id="bTos">TOSS</div>
   <div class="dz" id="bBst">BOOST</div>
   <div class="dz" id="bBrk">BRAKE<br>drift</div>
   <div class="dz" id="bGas">GAS</div>
-  <div class="tiny"><button id="dJobs">Jobs</button><button id="dCal">Centre</button><button id="dView">View: Chase</button><button id="dAuto">Auto-gas: off</button></div>
+  <div class="tiny"><button id="dJobs">Jobs</button><button id="dCal">Centre</button><button id="dView">View: Chase</button><button id="dAuto">Auto-gas: off</button><button id="dSteer">Steer: Tilt</button></div>
   <div id="rot">Turn your phone sideways<br>and hold it like a steering wheel.</div>
   <div id="calib">
     <div style="font-size:24px; font-weight:800">Hold it like a steering wheel</div>
-    <div class="small" style="font-size:15px">Sideways, both hands, screen facing you.<br>Turn it to steer. Left thumb brakes (tap it in a turn to drift), right thumb is gas.</div>
+    <div class="small" style="font-size:15px">Sideways, both hands, screen facing you.<br>Turn it to steer. Right thumb is gas; left thumb brakes (tap it in a turn to drift) and boosts.</div>
     <button class="gold" id="calGo" style="font-size:22px; padding:16px 30px">I'm holding it - GO</button>
-    <button id="calTouch" style="background:#3a2226">No tilting: steer with a finger</button>
+    <button id="calTouch" style="background:#3a2226">No tilting: thumb controls (slide to steer)</button>
   </div>
 </div>
 
@@ -537,8 +549,17 @@ function tiltSteer(){
 }
 function centre(){ tilt.a0 = tilt.ang; buzz(15); }
 $('dCal').onclick = () => { $('calib').style.display = 'flex'; };
-$('calGo').onclick = () => { askMotion(); tilt.touch = false; setTimeout(centre, 80); $('calib').style.display = 'none'; goFull(); };
-$('calTouch').onclick = () => { tilt.touch = true; $('calib').style.display = 'none'; goFull(); };
+/* tilt, or thumbs: chosen at the start of a drive, switched any time, remembered */
+function setSteer(thumbs){
+  tilt.touch = !!thumbs; tilt.touchSt = 0;
+  store('wats_steer', thumbs ? 'thumbs' : 'tilt');
+  $('drive').classList.toggle('thumbs', !!thumbs);
+  $('dSteer').textContent = 'Steer: ' + (thumbs ? 'Thumbs' : 'Tilt');
+}
+$('calGo').onclick = () => { askMotion(); setSteer(false); setTimeout(centre, 80); $('calib').style.display = 'none'; goFull(); };
+$('calTouch').onclick = () => { setSteer(true); $('calib').style.display = 'none'; goFull(); };
+$('dSteer').onclick = () => { const th = !tilt.touch; setSteer(th); if(!th){ askMotion(); setTimeout(centre, 80); } sound('click'); };
+if(recall('wats_steer') === 'thumbs') setSteer(true);
 function goFull(){
   try {
     const el = document.documentElement;
@@ -555,10 +576,21 @@ function bindHold(el, key){
 bindHold($('bGas'), 'gas'); bindHold($('bBrk'), 'brk'); bindHold($('bBst'), 'bst');
 $('bTos').addEventListener('pointerdown', e => { e.preventDefault(); $('bTos').classList.add('down'); act({a: 'toss', ang: 0, pow: 0.5}); buzz(15); });
 ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(ev => $('bTos').addEventListener(ev, () => $('bTos').classList.remove('down')));
-// finger steering: drag across the middle
-$('dmid').addEventListener('pointerdown', e => { if(!tilt.touch) return; tilt.touchX = e.clientX; $('dmid').setPointerCapture(e.pointerId); });
-$('dmid').addEventListener('pointermove', e => { if(tilt.touch && tilt.touchX != null){ tilt.touchSt = Math.max(-1, Math.min(1, (e.clientX - tilt.touchX) / 70)); } });
-['pointerup', 'pointercancel', 'lostpointercapture'].forEach(ev => $('dmid').addEventListener(ev, () => { tilt.touchX = null; tilt.touchSt = 0; }));
+// thumb steering: touch anywhere on the slider, slide left or right from there; let go and it centres
+(function(){
+  const pad = $('bSteer'), knob = pad.querySelector('.knob');
+  let id = null, x0 = 0;
+  const showKnob = () => { knob.style.left = (50 + (tilt.touchSt || 0) * 38) + '%'; };
+  pad.addEventListener('pointerdown', e => { e.preventDefault(); id = e.pointerId; x0 = e.clientX; tilt.touchSt = 0; pad.setPointerCapture(id); showKnob(); });
+  pad.addEventListener('pointermove', e => {
+    if(e.pointerId !== id) return;
+    const span = pad.clientWidth * 0.3, d = Math.max(-1, Math.min(1, (e.clientX - x0) / span));
+    tilt.touchSt = Math.sign(d) * Math.pow(Math.abs(d), 1.25);   // fine near the middle, full lock at the edge
+    showKnob();
+  });
+  const up = e => { if(e.pointerId !== id) return; id = null; tilt.touchSt = 0; showKnob(); };
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(ev => pad.addEventListener(ev, up));
+})();
 function release(){ IN.gas = IN.brk = IN.bst = 0; ['bGas', 'bBrk', 'bBst'].forEach(id => $(id).classList.remove('down')); send(); }
 let lastSent = 0, sent = '';
 function send(){

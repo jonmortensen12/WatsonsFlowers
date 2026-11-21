@@ -24,4 +24,6 @@ Enter and drive with the arrow keys.
   `web/flowers/credits.json`.
 - Sound engine and instruments from Family Beatdown (synthesized, no
   sample files).
+- 3D models (trees, cacti, rocks, streetlights, the goons) by Quaternius,
+  CC0. List in `web/models/CREDITS.txt`.
 - three.js (MIT), PeerJS.

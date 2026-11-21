@@ -60,6 +60,25 @@ carnations, daisies and fern, arranged into proper bouquets.
 | `tools/art.mjs` | Draws the icons and the link preview. |
 | `tools/flowers.py` | Fetches the flower photos (sources in `tools/flowers/sources.json`) and cuts them out into `web/flowers/`. |
 
+## Models (Quaternius, CC0)
+
+`web/models/` (credits in `CREDITS.txt`): palms, saguaros and a flowering
+cactus, a palo verde stand-in, a pine, bushes, rocks, a streetlight, a stop
+sign, and two Punks for the goons - single-file GLBs from the
+quaternius-showcase mirror on GitHub (the Drive copies are quota-blocked;
+the catalog in the "Free Assets" Drive folder says how). `loadModel` in
+world.js bakes a model into one geometry per material, base at the origin,
+height 1, colours lifted (x1.9: the packs are darker than the town).
+They are drawn **near the camera only** (`nearGroup`: within 150-220 m,
+a cap per variant, refreshed when the camera has moved 12 m), and the cheap
+drawn shapes stand in beyond that - thousands of model palms would be too
+much for a phone. Streetlights every 50 m along non-freeway roads, stop
+signs at neighbourhood entrances, the quarry's boulders as rocks. The goons
+are the Punk models posed by hand (upper arms rotated onto the handlebar;
+the mirror's copies have no animations). The three.js GLTFLoader,
+BufferGeometryUtils and SkeletonUtils (r170) are vendored in `web/lib/`.
+The Realistic Car Pack is only on Drive, so the cars are still drawn.
+
 ## The flowers
 
 All public domain (CC0 or Public Domain Mark), found through Openverse;
@@ -205,8 +224,12 @@ more person always helps.
   a steering wheel: tilt to steer (calibrated by "I'm holding it - GO" and
   CENTRE; angle of gravity across the screen, 2.5 deg dead zone, full lock
   at 32 deg, a soft curve). Left thumb BRAKE (dab it in a hard turn at speed
-  to drift), right thumb GAS, BOOST top right, TOSS top left. "No tilting"
-  gives finger steering; Auto-gas for small kids. Nobody driving: a
+  to drift) and BOOST above it, so the right thumb can hold GAS while
+  boosting; TOSS top right. "No tilting" (or the Steer button, any time;
+  remembered in `wats_steer`) gives **thumbs**: the left thumb steers on a
+  slider (touch anywhere on it, slide from there, it centres when let go,
+  a slight curve so small moves are fine), the right thumb has GAS, BRAKE
+  beside it and BOOST above it. Auto-gas for small kids. Nobody driving: a
   computer van. A driver who goes quiet for 6 s: the computer drives until
   they're back.
 - **Tosser**: rides with a driver. The phone shows the van from above and
@@ -282,8 +305,14 @@ Hood (driver's seat, van hidden), Low (the old close one). Kept in
 ## Driving numbers (simcheck prints them)
 
 0-60 mph ~1.9 s, top ~97 mph, boost ~104+ mph (black powder 165). A quarter
-turn at 30 mph under 1 s. Crash: more than 24 m/s (~54 mph) into something solid or
-20 m/s closing on a car (`CRASH_V`, `CRASH_CAR`). Anything softer dents the
+turn at 30 mph under 1 s. Crash: more than 30 m/s (~67 mph) into something solid or
+26 m/s (~58 mph) closing on a car (`CRASH_V`, `CRASH_CAR`); a dent is
+0.7% of the van per m/s of impact. A tumbling van is drawn lifted by
+however far its lowest corner would go under the ground, so it rolls on
+top of it (`V.placeVan`). Into water: one splash, then the respawn finds
+the nearest dry road, however far (`M.roadSpot`). Driving on the wrong
+side of a two-way road above 12 m/s fills boost at 9% a second
+(`wrongSide`, checked ten times a second; "ONCOMING!" on the phone). Anything softer dents the
 van instead: `v.dmg` 0-1 lowers top speed up to 15%, smokes over 0.55 and
 at 1 the van is WRECKED (a crash). Respawn patches it to 0.3. Low brick
 walls don't stop you: you plough through (slowed to 55-85%), the bricks

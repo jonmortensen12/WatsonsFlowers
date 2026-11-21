@@ -10,6 +10,8 @@
    The sky, sun and dust follow the clock (update()). Nothing here moves
    by itself except the pickups and the neon. */
 import * as THREE from './lib/three.module.min.js';
+import {GLTFLoader} from './lib/GLTFLoader.js';
+import {mergeGeometries} from './lib/BufferGeometryUtils.js';
 
 const SURF_RGB = [[201, 168, 122], [62, 64, 68], [118, 152, 72], [58, 140, 150], [190, 184, 172], [186, 152, 108], [146, 112, 66]];
 
@@ -34,6 +36,42 @@ function noise(g, w, h, amt, alpha){
 
 /* many boxes as one geometry, with vertex colours: list of {x0,z0,x1,z1,y0,h,color} */
 let GY = () => 0, HILLY = false;
+
+/* ---------------- models (Quaternius, CC0: see models/CREDITS.txt) ----------------
+   A model is loaded once and baked into a few geometries, one per material,
+   with its base at the origin and its height 1, so a placement is just a
+   position, a turn and a size. They are drawn near the camera only; further
+   out the cheap drawn shapes stand in (see the near/far swap below). */
+const gltf = new GLTFLoader();
+const modelCache = {};
+export function loadModel(name){
+  if(modelCache[name]) return modelCache[name];
+  return modelCache[name] = gltf.loadAsync('models/' + name + '.glb').then(g => {
+    g.scene.updateMatrixWorld(true);
+    const byMat = new Map();
+    g.scene.traverse(o => {
+      if(!o.isMesh || o.isSkinnedMesh) return;
+      const geo = o.geometry.clone(); geo.applyMatrix4(o.matrixWorld);
+      Object.keys(geo.attributes).forEach(k => { if(k !== 'position' && k !== 'normal' && k !== 'uv' && k !== 'color') geo.deleteAttribute(k); });
+      if(!geo.attributes.normal) geo.computeVertexNormals();
+      const nv = geo.attributes.position.count;
+      if(!geo.attributes.uv) geo.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(nv * 2), 2));
+      // some of these models colour by vertex: keep it (white where a part has none)
+      if(!geo.attributes.color) geo.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(nv * 3).fill(1), 3));
+      else if(geo.attributes.color.itemSize === 4){ const c4 = geo.attributes.color, c3 = new Float32Array(nv * 3); for(let i = 0; i < nv; i++){ c3[i * 3] = c4.getX(i); c3[i * 3 + 1] = c4.getY(i); c3[i * 3 + 2] = c4.getZ(i); } geo.setAttribute('color', new THREE.Float32BufferAttribute(c3, 3)); }
+      const m = [].concat(o.material)[0];
+      const key = m.uuid;
+      if(!byMat.has(key)) byMat.set(key, {m, geos: []});
+      byMat.get(key).geos.push(geo.index ? geo.toNonIndexed() : geo);
+    });
+    const parts = [...byMat.values()].map(({m, geos}) => ({geo: mergeGeometries(geos), mat: new THREE.MeshLambertMaterial({color: m.color.clone().multiplyScalar(1.9), map: m.map || null, side: m.side, transparent: m.transparent, alphaTest: m.alphaTest, vertexColors: true})}));
+    const box = new THREE.Box3();
+    parts.forEach(p => { p.geo.computeBoundingBox(); box.union(p.geo.boundingBox); });
+    const size = box.getSize(new THREE.Vector3()), cx = (box.min.x + box.max.x) / 2, cz = (box.min.z + box.max.z) / 2;
+    parts.forEach(p => { p.geo.translate(-cx, -box.min.y, -cz); p.geo.scale(1 / size.y, 1 / size.y, 1 / size.y); p.geo.computeBoundingSphere(); });
+    return {parts, w: size.x / size.y, d: size.z / size.y};
+  }).catch(e => { console.warn('model ' + name + ': ' + e.message); return null; });
+}
 function boxesGeo(list, uvScale){
   const n = list.length;
   const pos = new Float32Array(n * 24 * 3), nor = new Float32Array(n * 24 * 3), uv = new Float32Array(n * 24 * 2), col = new Float32Array(n * 24 * 3);
@@ -282,6 +320,63 @@ export function makeSign(T){
 export function buildWorld(scene, M, opts){
   opts = opts || {};
   HILLY = !!M.free; GY = HILLY ? M.ground : () => 0;
+  /* Near the camera, the models; further out, the drawn shapes.
+     A group: items [{x, z, h (height, m), rot, v (which variant), sx/sz
+     (width/depth, m, for a stretched one)}], the variants' model names, how
+     near is near (R), at most how many of each, and swap(item, near) to hide
+     or show the drawn stand-in. Refreshed as the camera moves. */
+  const NEAR = [], ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+  const _nm = new THREE.Matrix4(), _nq = new THREE.Quaternion(), _np = new THREE.Vector3(), _ns = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
+  let nearAt = null, nearT = 0;
+  function nearGroup(items, names, R, cap, swap){
+    const g = {items, names, R, cap, swap, ims: null, near: new Set()};
+    NEAR.push(g);
+    if(!items.length) return g;
+    Promise.all(names.map(loadModel)).then(ms => {
+      if(ms.some(m => !m)) return;
+      g.models = ms;
+      g.ims = ms.map(m => m.parts.map(p => { const im = new THREE.InstancedMesh(p.geo, p.mat, cap); im.count = 0; im.frustumCulled = false; scene.add(im); return im; }));
+      nearAt = null;   // refresh on the next frame
+    });
+    return g;
+  }
+  function refreshNear(cx, cz){
+    NEAR.forEach(g => {
+      if(!g.ims) return;
+      const want = new Set(), per = g.names.map(() => []);
+      g.items.forEach((it, i) => {
+        if(it.gone) return;
+        const d = Math.hypot(it.x - cx, it.z - cz);
+        if(d < g.R) per[it.v || 0].push([d, i]);
+      });
+      per.forEach((list, v) => {
+        if(list.length > g.cap){ list.sort((a, b) => a[0] - b[0]); list.length = g.cap; }
+        const ims = g.ims[v], m = g.models[v];
+        list.forEach(([d, i], n) => {
+          const it = g.items[i]; want.add(i);
+          _np.set(it.x, (it.gy != null ? it.gy : GY(it.x, it.z)) - (it.sink || 0), it.z);
+          _nq.setFromAxisAngle(_up, it.rot || 0);
+          if(it.sx) _ns.set(it.sx / m.w, it.h, it.sz / m.d); else _ns.set(it.h, it.h, it.h);
+          _nm.compose(_np, _nq, _ns);
+          ims.forEach(im => im.setMatrixAt(n, _nm));
+        });
+        ims.forEach(im => { im.count = list.length; im.instanceMatrix.needsUpdate = true; });
+      });
+      if(g.swap){
+        g.near.forEach(i => { if(!want.has(i)) g.swap(g.items[i], false); });
+        want.forEach(i => { if(!g.near.has(i)) g.swap(g.items[i], true); });
+      }
+      g.near = want;
+    });
+  }
+  function nearTick(cam){
+    if(!cam || !NEAR.length) return;
+    const now = performance.now();
+    if(nearAt && Math.hypot(cam.x - nearAt.x, cam.z - nearAt.z) < 12 && now - nearT < 800) return;
+    nearAt = {x: cam.x, z: cam.z}; nearT = now;
+    refreshNear(cam.x, cam.z);
+  }
+  const vary = (x, z, n) => Math.abs(Math.floor(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453)) % n;
   const W = {scene, M, glow: [], spin: [], pickups: [], propMesh: [], propIndex: [], dynamic: []};
   const RES = M.RES, GW = M.GW, GH = M.GH;
   const SX = GW * RES, SZ = GH * RES;
@@ -512,7 +607,7 @@ export function buildWorld(scene, M, opts){
   {
     const STORE = ['#e9dcc3', '#d7c4a3', '#efe7d8', '#c9b48f', '#e3d0b0', '#f2e6cc'];
     const BRICK = ['#9b4a32', '#a85a3c', '#8a3f2c', '#b06446', '#7f3a2a'];
-    const stores = [], bricks = [], campus = [], misc = [], towers = [], boxes2 = [];
+    const stores = [], bricks = [], campus = [], misc = [], towers = [], boxes2 = [], rocks = [];
     const GLASS = ['#9cc0dc', '#d9c6a0', '#b3c7d2', '#e6dccb', '#88a9c4', '#c9d8e2'];
     const CONT = ['#c0392b', '#2e6fb7', '#e0a32e', '#2f8a4c', '#e86a1c', '#8a9097'];
     M.buildings.forEach(b => {
@@ -528,7 +623,7 @@ export function buildWorld(scene, M, opts){
       else if(b.k === 'hangar'){ misc.push({...b, color: '#aab3ba'}); misc.push({x0: b.x0 + 3, x1: b.x1 - 3, z0: b.z0 - 0.1, z1: b.z1 + 0.1, h: 8, color: '#4e5961'}); }
       else if(b.k === 'ctower'){ misc.push({...b, h: b.h - 4, color: '#ece6da'}); misc.push({x0: b.x0 - 1.5, x1: b.x1 + 1.5, z0: b.z0 - 1.5, z1: b.z1 + 1.5, y0: b.h - 4, h: 3.2, color: '#5fa2c9'}); misc.push({x0: b.x0 - 1.8, x1: b.x1 + 1.8, z0: b.z0 - 1.8, z1: b.z1 + 1.8, y0: b.h - 0.8, h: 0.8, color: '#d24a2a'}); }
       else if(b.k === 'stand'){ misc.push({...b, color: '#cfc6b4'}); misc.push({x0: b.x0 - 1, x1: b.x1 + 1.5, z0: b.z0, z1: b.z1, y0: b.h + 2.5, h: 0.5, color: '#c4362f'}); }
-      else if(b.k === 'rock') misc.push({...b, color: '#a07e58'});
+      else if(b.k === 'rock') rocks.push({...b, color: '#a07e58'});
       else if(b.k === 'arts') {
         misc.push({...b, color: '#e1592f'});
         misc.push({x0: b.x0 + 4, x1: b.x1 - 10, z0: b.z0 + 2, z1: b.z1 - 2, y0: b.h, h: 4, color: '#3aa0c8'});
@@ -540,6 +635,12 @@ export function buildWorld(scene, M, opts){
     if(misc.length) scene.add(new THREE.Mesh(boxesGeo(misc), new THREE.MeshLambertMaterial({vertexColors: true})));
     if(towers.length) scene.add(new THREE.Mesh(boxesGeo(towers, 1 / 5), new THREE.MeshLambertMaterial({vertexColors: true, map: towerTex()})));
     if(boxes2.length) scene.add(new THREE.Mesh(boxesGeo(boxes2, 1 / 3), new THREE.MeshLambertMaterial({vertexColors: true, map: containerTex()})));
+    if(rocks.length){
+      const rm = new THREE.Mesh(boxesGeo(rocks), new THREE.MeshLambertMaterial({vertexColors: true}));
+      scene.add(rm);
+      const g = nearGroup(rocks.map(b => ({x: (b.x0 + b.x1) / 2, z: (b.z0 + b.z1) / 2, h: b.h * 1.15, sx: (b.x1 - b.x0) * 1.15, sz: (b.z1 - b.z0) * 1.15, rot: 0, v: vary(b.x0, b.z0, 3), sink: 0.3})), ['Rock_1', 'Rock_2', 'Rock_4'], 1e6, rocks.length, null);
+      const wait = setInterval(() => { if(g.ims){ rm.visible = false; clearInterval(wait); } }, 500);
+    }
     // ramada posts
     M.buildings.filter(b => b.k === 'ramada').forEach(b => {
       [[b.x0, b.z0], [b.x1, b.z0], [b.x0, b.z1], [b.x1, b.z1]].forEach(([x, z]) => {
@@ -598,7 +699,7 @@ export function buildWorld(scene, M, opts){
     function inst(list, geo, mat, place){
       if(!list.length) return;
       const im = new THREE.InstancedMesh(geo, mat, list.length);
-      list.forEach((t, i) => { place(t, p, q, s); p.y += GY(t.x, t.z); mt.compose(p, q, s); im.setMatrixAt(i, mt); });
+      list.forEach((t, i) => { place(t, p, q, s); p.y += GY(t.x, t.z); mt.compose(p, q, s); im.setMatrixAt(i, mt); (t._proc || (t._proc = [])).push([im, i, mt.clone()]); });
       scene.add(im);
     }
     const trunk = new THREE.MeshLambertMaterial({color: '#8a6a4a'});
@@ -617,6 +718,14 @@ export function buildWorld(scene, M, opts){
     const conn2 = new THREE.CylinderGeometry(0.22, 0.22, 0.8, 6).rotateZ(Math.PI / 2).translate(-0.4, 2.0, 0);
     const sag = mergeGeos([sg, arm1, arm2, conn1, conn2]);
     inst(by.saguaro, sag, new THREE.MeshLambertMaterial({color: '#4c7a3c'}), (t, p, q, s) => { p.set(t.x, 0, t.z); q.setFromAxisAngle(up, t.x * 3); s.set(t.s, t.s, t.s); });
+    // the models, near the camera
+    const swapTree = (t, near) => { (t._proc || []).forEach(([im, i, m]) => { im.setMatrixAt(i, near ? ZERO : m); im.instanceMatrix.needsUpdate = true; }); };
+    const treeItems = (list, h, n) => list.map(t => ({x: t.x, z: t.z, h: h * t.s, rot: t.x * 7.1 + t.z, v: vary(t.x, t.z, n), _t: t}));
+    const swapT = (it, near) => swapTree(it._t, near);
+    nearGroup(treeItems(by.palm, 11, 2), ['PalmTree_1', 'PalmTree_3'], 190, 140, swapT);
+    nearGroup(treeItems(by.saguaro, 5.2, 3), ['Cactus_2', 'Cactus_3', 'CactusFlowers_2'], 190, 120, swapT);
+    nearGroup(treeItems(by.pv, 5.6, 1), ['CommonTree_1'], 190, 160, swapT);
+    nearGroup(treeItems(by.pine, 8.5, 1), ['PineTree_1'], 190, 80, swapT);
   }
 
   /* props: bins, bushes, light poles, bales - breakable, so they can vanish */
@@ -638,15 +747,23 @@ export function buildWorld(scene, M, opts){
     Object.keys(kinds).forEach(k => {
       const list = kinds[k]; if(!list.length) return;
       const im = new THREE.InstancedMesh(geos[k][0], new THREE.MeshLambertMaterial({color: geos[k][1], flatShading: k === 'bush'}), list.length);
-      list.forEach((p, i) => { mt.makeTranslation(p.x, GY(p.x, p.z), p.z); im.setMatrixAt(i, mt); p._im = im; p._i = i; });
+      list.forEach((p, i) => { mt.makeTranslation(p.x, GY(p.x, p.z), p.z); im.setMatrixAt(i, mt); p._im = im; p._i = i; p._broken = false; p._near = false; });
       scene.add(im);
       W.props[k] = im;
     });
-    W.setProp = function(id, visible){
-      const p = M.props[id]; if(!p || !p._im) return;
-      if(visible) mt.makeTranslation(p.x, GY(p.x, p.z), p.z); else mt.makeScale(0, 0, 0);
+    const drawProp = p => {
+      if(!p._broken && !p._near) mt.makeTranslation(p.x, GY(p.x, p.z), p.z); else mt.makeScale(0, 0, 0);
       p._im.setMatrixAt(p._i, mt); p._im.instanceMatrix.needsUpdate = true;
     };
+    W.setProp = function(id, visible){
+      const p = M.props[id]; if(!p || !p._im) return;
+      if(p._broken === !visible) return;
+      p._broken = !visible; drawProp(p);
+      if(p._item){ p._item.gone = p._broken; nearAt = null; }
+    };
+    // bushes near the camera are models
+    const bushItems = kinds.bush.map(p => { const it = {x: p.x, z: p.z, h: 1.5, rot: p.x * 3.3, v: vary(p.x, p.z, 3), _p: p}; p._item = it; return it; });
+    nearGroup(bushItems, ['Bush_1', 'Bush_2', 'BushBerries_1'], 150, 220, (it, near) => { it._p._near = near; drawProp(it._p); });
   }
 
   /* ramps: striped boards with a JUMP! sign and flashing lights, so they
@@ -712,6 +829,32 @@ export function buildWorld(scene, M, opts){
     });
     scene.add(lights);
     W.rampLights = lights;
+  }
+
+  /* streetlights along the main roads, every 50 m, sides taking turns;
+     stop signs where a neighbourhood street comes out onto one */
+  {
+    const lamps = [];
+    M.lines.forEach(l => {
+      if(l.kind === 'fwy') return;
+      const nodesAt = l.nodes.map(q => q.at);
+      let side = 1;
+      for(let s0 = l.lo + 25; s0 < l.hi - 10; s0 += 50){
+        if(nodesAt.some(a => Math.abs(a - s0) < 18)) continue;
+        const p = M.linePoint(l, s0), off = l.w / 2 + 1.4;
+        side = -side;
+        const x = p.x - p.dz * off * side, z = p.z + p.dx * off * side;
+        lamps.push({x, z, h: 7.5, rot: Math.atan2(p.dx, p.dz) + (side > 0 ? 0 : Math.PI)});
+      }
+    });
+    nearGroup(lamps, ['Streetlight_Single'], 220, 90, null);
+    const signs = [];
+    M.loops.forEach(lp => lp.entries.forEach(e => {
+      let dx = e.gx - e.lx, dz = e.gz - e.lz; const L = Math.hypot(dx, dz) || 1; dx /= L; dz /= L;
+      const back = e.line.w / 2 + 4, x = e.gx - dx * back - dz * 5.6, z = e.gz - dz * back + dx * 5.6;
+      signs.push({x, z, h: 2.8, rot: Math.atan2(dz, -dx)});   // its face (+x) turned to meet the driver coming out
+    }));
+    nearGroup(signs, ['Sign_Stop'], 160, 40, null);
   }
 
   /* traffic lights: a pole and a head per signalised corner */
@@ -937,6 +1080,7 @@ export function buildWorld(scene, M, opts){
   ];
   const ca = new THREE.Color(), cb = new THREE.Color();
   W.update = function(hour, dust, t, camPos){
+    nearTick(camPos);
     let i = 0;
     while(i < KEYS.length - 2 && hour > KEYS[i + 1][0]) i++;
     const A = KEYS[i], B = KEYS[i + 1];

@@ -86,6 +86,8 @@ export function start(opts){
       snd('near');
       opts.hud.flash('NEAR MISS!', '#7fe0ff');
       buzz(25);
+    } else if(e.k === 'wrongway'){
+      opts.hud.flash('ONCOMING! Boost filling', '#7fd0ff');
     } else if(e.k === 'smash'){
       opts.send({t: 've', e: {k: 'smash', p: e.p}});
       snd('smash');

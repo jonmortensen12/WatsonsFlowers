@@ -8,6 +8,8 @@
    camera. It draws what it is given; it decides nothing. */
 import * as THREE from './lib/three.module.min.js';
 import {canvas as mkCanvas, tex} from './world.js';
+import {GLTFLoader} from './lib/GLTFLoader.js';
+import * as SkeletonUtils from './lib/SkeletonUtils.js';
 
 // bright on purpose: a car has to be seen at 80 mph against tan desert and grey road
 const CAR_COLORS = ['#ff3b30', '#1e7bff', '#ffd60a', '#2fd158', '#ff8a00', '#b44dff', '#00d1c1', '#ff2d92', '#ffffff', '#4fc3ff'];
@@ -148,8 +150,20 @@ export function createView(scene, M, opts){
   V.placeVan = function(i, s, dt, t){
     const o = V.vans[i]; if(!o) return;
     o.grp.position.set(s.x, s.y, s.z);
-    if(s.crash) o.grp.rotation.set(s.crash.ax || 0, -(s.crash.h != null ? s.crash.h : s.h) + (s.crash.ay || 0), s.crash.az || 0, 'YXZ');
-    else {
+    if(s.crash){
+      o.grp.rotation.set(s.crash.ax || 0, -(s.crash.h != null ? s.crash.h : s.h) + (s.crash.ay || 0), s.crash.az || 0, 'YXZ');
+      // tumbling, it rolls on the ground rather than through it: lift it by
+      // however far its lowest corner would go under
+      o.grp.updateMatrix();
+      let low = 1e9;
+      for(let k = 0; k < 8; k++){
+        _v3.set(k & 1 ? 2.75 : -2.75, k & 2 ? 2.75 : 0, k & 4 ? 1.1 : -1.1).applyMatrix4(o.grp.matrix);
+        const under = _v3.y - M.height(_v3.x, _v3.z);
+        if(under < low) low = under;
+      }
+      if(low < 0) o.grp.position.y -= low;
+    }
+    if(!s.crash){
       const lean = -(s.yaw || 0) * Math.min(1, (s.spd || 0) / 30) * 0.06 * (s.drift ? 2 : 1);
       let pitch = s.air ? Math.max(-0.4, Math.min(0.3, (s.vy || 0) * 0.03)) : 0;
       if(!s.air && M.free){ const fx = Math.cos(s.h), fz = Math.sin(s.h); pitch = Math.atan2(M.height(s.x + fx * 2, s.z + fz * 2) - M.height(s.x - fx * 2, s.z - fz * 2), 4); }
@@ -235,9 +249,28 @@ export function createView(scene, M, opts){
     const marker = new THREE.Sprite(new THREE.SpriteMaterial({map: tex(mk), transparent: true, fog: false, depthTest: false}));
     marker.scale.set(1.3, 1.3, 1); marker.position.set(0, 3.4, 0); marker.renderOrder = 3; g.add(marker);
     g.scale.setScalar(1.35);
-    g.userData = {torso, loot, marker};
+    g.userData = {torso, loot, marker, body: [legs, torso, head, hood], n: goonPool.length};
     scene.add(g);
+    rideOn(g);
     return g;
+  }
+  /* the goons themselves: Quaternius's Punks (CC0), posed with their hands on
+     the handlebar, in place of the drawn body once they have loaded */
+  let riders = null;
+  Promise.all(['Punk_Male', 'Punk_Female'].map(n => new GLTFLoader().loadAsync('models/' + n + '.glb'))).then(gs => {
+    riders = gs.map(g => g.scene);
+    goonPool.forEach(rideOn);
+  }).catch(e => console.warn('goon models: ' + e.message));
+  function rideOn(g){
+    if(!riders || g.userData.rider) return;
+    const c = SkeletonUtils.clone(riders[g.userData.n % riders.length]);
+    const arm = (n, sx, sz) => { const b = c.getObjectByName(n); if(b){ b.rotation.x += sx; b.rotation.z += sz; } };
+    arm('UpperArmL', -0.9, -0.9); arm('UpperArmR', -0.9, 0.9);
+    c.traverse(o => { if(o.isMesh){ o.frustumCulled = false; } });
+    c.scale.setScalar(0.68); c.rotation.y = Math.PI; c.position.set(-0.15, 0.26, 0);   // facing along the deck
+    g.add(c);
+    g.userData.body.forEach(m => { m.visible = false; });
+    g.userData.rider = c;
   }
   V.goons = function(list, t){
     let i = 0;
