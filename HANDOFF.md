@@ -232,6 +232,12 @@ more person always helps.
   beside it and BOOST above it. Auto-gas for small kids. Nobody driving: a
   computer van. A driver who goes quiet for 6 s: the computer drives until
   they're back.
+- **Picking up** (any driver): drive through the ring at either shop, the
+  pink pillar 24 m round (`sh.r`; the ring on the ground is its edge), at up
+  to ~63 mph - at Watson's it reaches over Main Street, so a drive-by
+  counts. With nothing ready the phone says so ("Nothing ready yet").
+  Computer vans keep the old rule (stop within 11 m, under 34 mph, and wait
+  there for a vanful), which is what keeps their deliveries up.
 - **Tosser**: rides with a driver. The phone shows the van from above and
   the porch; swipe towards it. Direction and strength both count (with a
   generous assist); speed adds a little error but a DRIVE-BY (over 22 m/s)

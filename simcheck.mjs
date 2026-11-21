@@ -344,5 +344,20 @@ for(const [n, o] of runs){
   ok(wet === 1, 'into the lake with the gas held: one splash, then back on a dry road (' + wet + ' splashes in 20 s)');
 }
 
+/* picking up: straight down Main Street past Watson's at 54 mph, no stopping */
+for(const key of ['mesa', 'ridge']){
+  const T = WMap.town(key), sh = T.shops[0];
+  const S = WSim.create(T, {seed: 3}); WSim.addVan(S, 'me', 'T'); WSim.start(S);
+  for(let i = 0; i < 60 * 40; i++) WSim.step(S);
+  S.orders.forEach(o => { if(o.kind === 'del' && (o.state === 'new' || o.state === 'arr')) o.state = 'ready'; });
+  const ready = S.orders.filter(o => o.state === 'ready').length;
+  const v = S.vans[0]; S.opts.noTraffic = true;
+  const n = T.lineNear(T.mainLine, sh.x, sh.z), p = T.linePoint(T.mainLine, n.s - 80), off = 4.5;
+  const h = Math.atan2(p.dz, p.dx);
+  place(v, p.x - p.dz * off, p.z + p.dx * off, h, 24); v.y = T.height(v.x, v.z); v.ghost = 99; v.cargo = [];
+  for(let i = 0; i < 60 * 5; i++){ S.cars.length = 0; const q = T.linePoint(T.mainLine, T.lineNear(T.mainLine, v.x, v.z).s + 20); WSim.input(S, 0, {st: Math.max(-1, Math.min(1, WSim.wrapA(Math.atan2(q.z + q.dx * off - v.z, q.x - q.dz * off - v.x) - v.h) * 2)), gas: v.spd < 24 ? 1 : 0}); WSim.step(S); }
+  ok(ready > 0 && v.cargo.length > 0, (key === 'mesa' ? 'Mesa' : 'the Ridge') + ": driving past Watson's on Main Street at 54 mph picks up " + v.cargo.length + ' bouquets');
+}
+
 console.log(fails ? `\n${fails} FAILED` : '\nall good');
 process.exit(fails ? 1 : 0);

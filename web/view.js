@@ -183,7 +183,13 @@ export function createView(scene, M, opts){
   V.target = function(i, tp, t){
     const o = V.vans[i]; if(!o) return;
     o.mark.visible = !!tp;
-    if(tp){ o.mark.position.set(tp.x, GY(tp.x, tp.z), tp.z); o.mark.children[1].scale.setScalar(1 + 0.15 * Math.sin(t * 6)); }
+    if(tp){
+      o.mark.position.set(tp.x, GY(tp.x, tp.z), tp.z);
+      // a shop: a wide pillar, and the ring on the ground is the edge of where you load
+      const big = tp.r ? tp.r / 2.2 : 1, wide = tp.r ? tp.r * 0.3 / 1.4 : 1;
+      o.mark.children[0].scale.set(wide, 1, wide);
+      o.mark.children[1].scale.setScalar(big * (1 + (tp.r ? 0.03 : 0.15) * Math.sin(t * 6)));
+    }
   };
   V.route = function(i, r){
     const o = V.vans[i]; if(!o) return;

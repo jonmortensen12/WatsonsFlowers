@@ -359,6 +359,7 @@ function create(hooks){
       case 'load': phoneFx(e.v, 'load', {n: e.n}); break;
       case 'mist': phoneFx(e.v, 'mist'); break;
       case 'ice': phoneFx(e.v, 'ice'); break;
+      case 'noneready': phoneFx(e.v, 'noneready'); break;
       case 'powder': phoneFx(e.v, 'powder'); break;
       case 'boom': phoneFx(e.v, 'boom'); break;
       case 'gooned': phoneFx(e.v, 'gooned'); break;

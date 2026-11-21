@@ -644,7 +644,7 @@ function build(G, seed){
     fields.push({x0: L.x - 40, z0: bz1 + 28, x1: L.x + 40, z1: Math.min(c.z1 - 4, bz1 + 70), k: 'roses'});
     // the load zone: drive through the lot
     var mn = FREE ? M.lineNear(mainLine, L.x, front) : null;
-    M.shops.push({key: 'watsons', name: "Watson's Flowers", x: L.x, z: front + 8, r: 11, line: mainLine, lx: FREE ? mn.x : L.x, lz: FREE ? mn.z : mainLine.p, s: FREE ? mn.s : null});
+    M.shops.push({key: 'watsons', name: "Watson's Flowers", x: L.x, z: front + 8, r: 24, line: mainLine, lx: FREE ? mn.x : L.x, lz: FREE ? mn.z : mainLine.p, s: FREE ? mn.s : null});
     // the rest: desert, a few palms
     for(var x = c.x0 + 6; x < L.x - 44; x += 16) for(var z = c.z0 + 6; z < c.z1 - 6; z += 16) if(R() < 0.3) addTree(x, z, R() < 0.5 ? 'palm' : 'saguaro');
     for(var x2 = L.x + 44; x2 < c.x1 - 6; x2 += 16) for(var z2 = c.z0 + 6; z2 < c.z1 - 6; z2 += 16) if(R() < 0.3) addTree(x2, z2, 'pv');
@@ -664,7 +664,7 @@ function build(G, seed){
     if(!best) return;
     best.grandpa = true; best.num = 122; best.dir = 'E';
     M.grandpaHouse = best.id;
-    M.shops.push({key: 'grandpa', name: (FREE || G.zones) ? "Grandpa's" : "Grandpa's (Gilbert)", x: best.front.x, z: best.front.z, r: 11, house: best.id});
+    M.shops.push({key: 'grandpa', name: (FREE || G.zones) ? "Grandpa's" : "Grandpa's (Gilbert)", x: best.front.x, z: best.front.z, r: 24, house: best.id});
   }
 
   function templeCell(c){

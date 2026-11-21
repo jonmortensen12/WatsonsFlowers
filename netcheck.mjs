@@ -80,6 +80,10 @@ await grandma.locator('#hols button', {hasText: "Valentine"}).click();
 await sleep(300);
 ok(await tv.evaluate(() => WTV.G.S.holiday) === 'valentines', 'any phone picks the holiday');
 await tiny.click('#startBtn');
+// a long day: on a slow machine the checks below can take longer than the
+// game's seven minutes, and "closing time" ends the day on purpose anyway
+await tv.waitForFunction(() => WTV.G.phase === 'count' || WTV.G.phase === 'day', null, {polling: 250, timeout: 10000});
+await tv.evaluate(() => { WTV.G.S.dayLen = 3600; });
 try { await tv.waitForFunction(() => WTV.G.phase === 'day', null, {polling: 250, timeout: 20000}); }
 catch(e){ console.log('phase', await tv.evaluate(() => WTV.G.phase), errors); throw e; }
 ok(true, 'the day started');

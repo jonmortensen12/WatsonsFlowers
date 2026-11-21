@@ -171,6 +171,7 @@ export function start(opts){
     else if(f.k === 'goonhit'){ v.boost = Math.min(1, v.boost + 0.15); opts.hud.flash(f.rec ? 'GOT IT BACK! +$5' : 'GOON DOWN! +$5', '#7dff6b'); }
     else if(f.k === 'crash' && f.lost && f.lost.length && V){ V.holiday = hol; V.event({k: 'spill', x: v.x, y: v.y, z: v.z, vx: 0, vz: 0, lost: f.lost}); opts.hud.flash(f.lost.length + (f.lost.length > 1 ? ' bouquets' : ' bouquet') + ' everywhere', '#f2a7b4'); }
     else if(f.k === 'mist') opts.hud.flash('Misters! Flowers perk up', '#9fe8ff');
+    else if(f.k === 'noneready') opts.hud.flash('Nothing ready yet - the arrangers are on it', '#f2a7b4');
     else if(f.k === 'load') opts.hud.flash('Loaded ' + f.n + (f.n > 1 ? ' bouquets' : ' bouquet'), '#f2a7b4');
     else if(f.k === 'gooned'){ opts.hud.flash('GOONED!', '#ff5a5a', true); buzz([100, 50, 100]); }
     else if(f.k === 'land' && f.how) opts.hud.flash(f.how === 'perfect' ? 'ON THE PORCH! $' + f.pay : f.how === 'miss' ? 'MISSED!' : 'Delivered! $' + f.pay, f.how === 'perfect' ? '#7dff6b' : f.how === 'miss' ? '#ff8a8a' : '#fff', f.how === 'perfect');

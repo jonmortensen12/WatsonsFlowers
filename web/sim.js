@@ -838,7 +838,7 @@ function targetPoint(S, v){
   if(!v.tgt) return null;
   var M = S.M;
   if(v.tgt.k === 'house'){ var h = M.houses[v.tgt.id]; return {x: h.porch.x, z: h.porch.z}; }
-  var sh = M.shops[v.tgt.id]; return {x: sh.x, z: sh.z};
+  var sh = M.shops[v.tgt.id]; return {x: sh.x, z: sh.z, r: sh.r};
 }
 
 function chooseTarget(S, v){
@@ -964,7 +964,7 @@ function aiDrive(S, v){
   if(vt < 1) ai.patience = (ai.patience || 0) + DT; else if(ai.patience >= 3) { ai.patience += DT; if(ai.patience > 5) ai.patience = 0; } else ai.patience = 0;
   // waiting at the shop for the arrangers to finish a few more
   var shopNear = null;
-  S.M.shops.forEach(function(sh){ if(Math.hypot(sh.x - v.x, sh.z - v.z) < sh.r * 0.8) shopNear = sh; });
+  S.M.shops.forEach(function(sh){ if(Math.hypot(sh.x - v.x, sh.z - v.z) < 8.8) shopNear = sh; });
   if(shopNear && v.cargo.length < CAP){
     var coming = S.orders.filter(function(o){ return o.kind === 'del' && (o.state === 'new' || o.state === 'arr' || o.state === 'ready'); }).length;
     ai.hold = (ai.hold || 0) + DT;
@@ -990,10 +990,11 @@ function aiDrive(S, v){
 /* ---------------- shops, misters, pickups ---------------- */
 function vanStops(S, v){
   var M = S.M;
-  // loading at either shop: drive through slowly
+  // loading at either shop: drive through the ring (24 m round the pillar), up to ~63 mph
   M.shops.forEach(function(sh){
     if(v.cargo.length >= CAP) return;
-    if(Math.hypot(sh.x - v.x, sh.z - v.z) > sh.r || v.spd > 15) return;
+    // (the computer drivers stop and wait for a vanful, as they always have)
+    if(Math.hypot(sh.x - v.x, sh.z - v.z) > (v.owner ? sh.r : 11) || v.spd > (v.owner ? 28 : 15)) return;
     var ready = S.orders.filter(function(o){ return o.state === 'ready' && (o.pref < 0 || o.pref === v.i || !S.vans[o.pref]); });
     ready.sort(function(a, b){ return ((b.pref === v.i) - (a.pref === v.i)) || (b.prio - a.prio) || (a.born - b.born); });
     var n = 0;
@@ -1002,6 +1003,8 @@ function vanStops(S, v){
       o.state = 'van'; o.van = v.i; o.fresh = Math.min(1, o.fresh); v.cargo.push(o.id); n++;
     }
     if(n){ emit(S, {k: 'load', v: v.i, n: n, shop: sh.key}); v.routeT = 0; }
+    // in the ring with nothing to pick up: say so (now and then), so nobody thinks they missed
+    else if(!v.cargo.length && S.t - (v.noneT || -99) > 6){ v.noneT = S.t; emit(S, {k: 'noneready', v: v.i}); }
   });
   // the sun
   var hot = heat01(S);
