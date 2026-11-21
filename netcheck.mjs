@@ -95,6 +95,9 @@ for(const [p, scr] of [[dad, 'drive'], [kid, 'toss'], [aunt, 'arrange'], [grandm
   ok(await p.evaluate(s => document.getElementById(s).classList.contains('on'), scr), (await p.evaluate(() => document.getElementById('nameIn').value)) + ' sees the ' + scr + ' screen');
 }
 
+// Chromium freezes pages left in the background long enough (a slow run gets
+// there): each phone is brought to the front before its turn
+await dad.bringToFront();
 // Dad: finger steering, hold the gas
 await sleep(1500);
 if(await dad.locator('#calTouch').isVisible()) await dad.click('#calTouch');
@@ -117,6 +120,7 @@ await dad.mouse.up();
 const thumbBack = await dad.evaluate(() => tiltSteer());
 ok(thumbSt > 0.5 && thumbBack === 0, 'sliding the thumb right steers right (' + thumbSt.toFixed(2) + '), letting go centres it');
 
+await aunt.bringToFront();
 // Aunt: claim the first order and make it exactly
 await aunt.waitForFunction(sel => { const e = document.querySelector(sel); return e && e.getClientRects().length > 0; }, '#aList .card', {polling: 250, timeout: 30000});
 await aunt.locator('#aList .card:not(.walk):not(.taken)').first().click();
@@ -149,6 +153,7 @@ await sleep(400);
 const made = await tv.evaluate(id => { const o = WSim.orderById(WTV.G.S, id); return o && {state: o.state, q: o.q}; }, order.id);
 ok(made && made.state !== 'arr' && made.q >= 1, "Aunt's arrangement went into the cooler at " + Math.round((made && made.q) * 100) + '%');
 
+await grandma.bringToFront();
 // Grandma waters, Tiny sells a rose, Uncle pings
 await grandma.waitForFunction(() => cur === 'grow' && SNAP && SNAP.gar && document.getElementById('gcan').clientWidth > 0, null, {polling: 250, timeout: 30000});
 const plot = await grandma.evaluate(() => { const r = document.getElementById('gcan').getBoundingClientRect(), G2 = gardenGeom(), p = plotXY(G2, 1); return {x: r.x + p.x + G2.cell / 2, y: r.y + p.y + G2.cell / 2}; });
@@ -161,12 +166,14 @@ await grandma.evaluate(() => document.querySelector('#gsize button[data-n="36"]'
 await sleep(500);
 ok(await tv.evaluate(() => WTV.G.S.garden.length === 36), 'the garden grows to 36 plots for a bigger challenge');
 const roseBefore = await tv.evaluate(() => WTV.G.S.roses);
+await tiny.bringToFront();
 for(let i = 0; i < 40 && (await tv.evaluate(() => WTV.G.S.roses)) === roseBefore; i++){
   const pt = await tiny.evaluate(() => { const c = document.getElementById('ccan'); const W = c.width / (c._dpr || 1); const p = CART.people.find(p => p.want && !p.happy && Math.abs(p.x - CART.x * W) < W * 0.3 && p.x > 10 && p.x < W - 10); return p ? {x: p.x, y: p.y - 25} : null; });
   if(pt){ const box = await tiny.locator('#ccan').boundingBox(); await tiny.mouse.click(box.x + pt.x, box.y + pt.y); }
   await sleep(250);
 }
 ok(await tv.evaluate(() => WTV.G.S.roses) > roseBefore, 'the rose cart sold a rose');
+await uncle.bringToFront();
 const map = await uncle.locator('#dmap').boundingBox();
 await uncle.mouse.move(map.x + map.width / 2, map.y + map.height / 2);
 await uncle.mouse.down(); await sleep(1600); await uncle.mouse.up();
